@@ -12,6 +12,8 @@ The assignment brief is in [`take-home-assignment.md`](take-home-assignment.md).
 FastAPI (uv, Python 3.12) · LangChain · ChromaDB · SQLite · OpenAI `gpt-4o-mini` / `text-embedding-3-small` · React + Vite + TypeScript + Tailwind
 
 ## Running locally
+Full backend guide (switching between OpenAI and Ollama, ingestion, the query API, every endpoint, troubleshooting): [`backend/README.md`](backend/README.md).
+
 Backend (from `backend/`):
 ```bash
 uv sync

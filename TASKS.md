@@ -26,63 +26,56 @@ Execute in order. Each task lists **Input** (what must exist), **Files** (what i
 
 ---
 
-## Exercise 1: Meetings → enrichment → query API
+## Exercise 1: Meetings → docling → recursive chunks → Chroma + hybrid retrieval API
 
-- [ ] **1.1 Config + model factory**
-  - Input: 0.2
-  - Files: `app/config.py`, `app/llm/factory.py`, `tests/test_factory.py`
-  - Accept: all tunables in Settings (see CLAUDE.md); `get_llm()` / `get_embeddings()` honor the provider/model; fakes when `APP_ENV=test`; Chroma collection name gets the embedding model as a suffix
-  - Verify: `uv run pytest tests/test_factory.py`
+Design: docling normalizes markdown; title/date/attendees(+roles) are parsed deterministically; LLM enrichment via structured output; **structure-aware recursive chunking** (headings → merge small sections → recursive split of oversized ones by paragraph/turn → line → sentence, token budget is an upper bound); **hybrid retrieval** = semantic (Chroma) + BM25 → weighted RRF → **pointwise LLM rerank**. Providers are configurable: `openai` (gpt-4o-mini, text-embedding-3-small) or `ollama` (qwen2.5:7b, nomic-embed-text). No fake models; tests use local Ollama.
 
-- [ ] **1.2 SQLite layer**
-  - Input: 1.1
-  - Files: `app/db/schema.sql` (documents, action_items, enrichment_cache), `app/db/sqlite.py`, `app/main.py` (lifespan init), `tests/test_db.py`
-  - Accept: `init_db()` is idempotent; the connection helper returns rows as dicts
-  - Verify: `uv run pytest tests/test_db.py`
+- [x] **1.1 Config + model factory**
+  - Files: `app/config.py`, `app/llm/factory.py`
+  - Accept: every tunable in Settings; `get_llm()` / `get_embeddings()` / `structured_llm()` for openai|ollama; nomic task prefixes; Chroma collection suffixed by embedding model; missing OpenAI key → `ConfigError` → HTTP 503
+  - Verify: `uv run pytest`; with `OPENAI_API_KEY=` and provider openai, `POST /api/query` → 503 with a clear message
 
-- [ ] **1.3 Meeting loader**
-  - Input: 1.2, `data/meetings/` present (inspect 2-3 real files before writing the parser)
-  - Files: `app/models/source.py` (SourceDoc), `app/ingestion/loaders/meeting.py`, `app/ingestion/__main__.py` (`--dry-run`, `--only`), `tests/test_meeting_loader.py`
-  - Accept: title, date and attendees parsed deterministically; body text preserved
-  - Verify: `uv run pytest tests/test_meeting_loader.py`; `uv run python -m app.ingestion --dry-run --only meetings` lists 20 docs with attendees and dates
+- [x] **1.2 SQLite layer**
+  - Files: `app/db/schema.sql` (documents, action_items, enrichment_cache), `app/db/sqlite.py`, `app/db/repository.py`
+  - Accept: idempotent `init_db()` on startup; documents store attendees, roles, meeting type, location and enrichment
+  - Verify: `uv run pytest` (integration test reads documents back through the API)
 
-- [ ] **1.4 Enrichment chain**
-  - Input: 1.3
-  - Files: `app/models/enrichment.py`, `app/ingestion/enrich.py`, `tests/test_enrich.py`
-  - Accept: `with_structured_output(EnrichmentResult)`; the prompt includes the company context and taxonomy; results cached by (content_hash, model); people never taken from the LLM
-  - Verify: `uv run pytest tests/test_enrich.py`; manual: `uv run python -m app.ingestion --dry-run --only meetings --enrich --limit 1` prints valid enrichment JSON
+- [x] **1.3 Meeting loader + docling**
+  - Files: `app/models/source.py`, `app/ingestion/loaders/meeting.py`, `app/ingestion/docling_md.py`
+  - Accept: handles frontmatter, label lines (`Meeting:`, `Date: … Time: …`, `Attendees: Name (Role), …`), `## Attendees` lists, speaker fallback; plain section labels promoted to `##`; speaker turns kept as paragraphs through docling
+  - Verify: `uv run pytest tests/test_meeting_loader.py`; `uv run python -m app.ingestion --dry-run`
 
-- [ ] **1.5 Chunking + vector store**
-  - Input: 1.1
-  - Files: `app/ingestion/chunking.py`, `app/retrieval/vectorstore.py`, `tests/test_vectorstore.py`
-  - Accept: RecursiveCharacterTextSplitter with configured size/overlap; flattened scalar metadata; `delete_by_doc_id` + upsert
-  - Verify: `uv run pytest tests/test_vectorstore.py` (2 fixture docs, the search returns the right one)
+- [x] **1.4 Enrichment chain**
+  - Files: `app/models/enrichment.py`, `app/ingestion/enrich.py`
+  - Accept: topic_domain, priority, products, summary, key_topics, decisions, action_items; cached by (content hash, model, prompt version); people never from the LLM; products normalized generically
+  - Verify: integration test asserts topic, products and action items
 
-- [ ] **1.6 Ingestion pipeline**
-  - Input: 1.3-1.5
-  - Files: `app/ingestion/pipeline.py`, `app/ingestion/__main__.py`, `tests/test_pipeline.py`
-  - Accept: load → enrich → SQLite → chunk → Chroma; idempotent via content_hash; prints a summary (docs, chunks, enriched, skipped)
-  - Verify: `uv run python -m app.ingestion --only meetings` → 20 docs; a rerun reports 0 re-enriched; `sqlite3 storage/app.db "select source_file, topic_domain, priority from documents"`
+- [x] **1.5 Structure-aware recursive chunking**
+  - Files: `app/ingestion/chunking.py`
+  - Accept: chunks never cross headings; small sections merged (`CHUNK_MIN_TOKENS`); only sections over `CHUNK_MAX_TOKENS` split recursively; each chunk has a context header + section path + scalar metadata
+  - Verify: `uv run pytest tests/test_chunking.py`
 
-- [ ] **1.7 Retriever with filters**
-  - Input: 1.6
-  - Files: `app/retrieval/retriever.py`, `tests/test_retriever.py`
-  - Accept: similarity search with relevance scores; filters on topic_domain, priority, source_type, person, date range; optional LLM extraction of filters from the NL query
-  - Verify: `uv run pytest tests/test_retriever.py`; manual: "Eagle-5 yield issues" → top results from meetings 1-4
+- [x] **1.6 Ingestion pipeline + CLI**
+  - Files: `app/ingestion/pipeline.py`, `app/ingestion/__main__.py`, `app/retrieval/vectorstore.py`
+  - Accept: load → enrich → chunk → Chroma → SQLite; skips unchanged files; prunes deleted files; per-file failures reported; concurrent runs → 409
+  - Verify: integration test (ingest 3, re-run skips 3, delete 1 → removed 1)
 
-- [ ] **1.8 Query + ingest + documents API**
-  - Input: 1.7
-  - Files: `app/models/api.py`, `app/api/routes_query.py`, `app/api/routes_ingest.py`, `app/api/routes_documents.py`, `app/main.py`
-  - Accept: `POST /api/query` returns a grounded answer + results with derived metadata (topic, priority, attendees, date, file); `POST /api/ingest`; `GET /api/documents` with filters
-  - Verify:
-    `curl -s -XPOST localhost:8000/api/query -H 'content-type: application/json' -d '{"query":"What is causing Eagle-5 yield loss?"}' | jq`
-    `curl -s 'localhost:8000/api/documents?topic_domain=yield' | jq length`
+- [x] **1.7 Hybrid retrieval + rerank**
+  - Files: `app/retrieval/bm25.py`, `app/retrieval/hybrid.py`, `app/retrieval/rerank.py`, `app/retrieval/types.py`
+  - Accept: semantic + BM25 candidates, weighted RRF, pointwise LLM rerank (`RERANKER=llm|none`); filters on topic/priority/source_type (Chroma `where`) and person/date range; per-result scores exposed
+  - Verify: `uv run pytest tests/test_retrieval_units.py`; integration test checks exact-term BM25 hits and the person filter
 
-- [ ] **1.9 Ex1 smoke + API tests** ✅ CHECKPOINT
-  - Input: 1.8
-  - Files: `scripts/smoke_ex1.sh`, `tests/test_api_ex1.py`
-  - Accept: the script exercises health, ingest, query and documents and fails on a non-200 or missing fields
-  - Verify: `uv run pytest`; `./scripts/smoke_ex1.sh` green against a live server
+- [x] **1.8 API**
+  - Files: `app/api/routes.py`, `app/answer/generate.py`, `app/answer/service.py`, `app/models/api.py`, `app/main.py`
+  - Accept: `POST /api/ingest`, `POST /api/query` (answer with [n] citations + results + derived document metadata + retrieval stats), `GET /api/documents[/{id}]`, `GET /api/stats`, `GET /api/health`
+  - Verify: `./scripts/smoke_ex1.sh` against a running server
+
+- [x] **1.9 Ex1 smoke + tests** ✅ CHECKPOINT (verified on fixtures with Ollama)
+  - Files: `scripts/smoke_ex1.sh`, `tests/conftest.py`, `tests/test_*.py`, `tests/fixtures/meetings/`
+  - Verify: `uv run pytest` (17 unit + 1 Ollama integration) and the smoke script, all green
+
+- [ ] **1.10 Real-data run** (when `data/meetings/` is complete)
+  - Verify: `POST /api/ingest` → `files_found` = 20, `failed` = []; check `warnings` for files without attendee lists; spot-check `GET /api/documents` topics/priorities; run `./scripts/smoke_ex1.sh`
 
 ---
 
@@ -210,8 +203,24 @@ Execute in order. Each task lists **Input** (what must exist), **Files** (what i
 
 ---
 
+## Backlog
+
+- [ ] **B1 Ingestion progress visibility**
+  - Problem: `POST /api/ingest` blocks until the whole run finishes, and the server log shows little per file, so there's no way to see progress during a long run (enrichment + embedding of 20+ files).
+  - Input: 1.6 pipeline, 1.8 API
+  - Files: `app/ingestion/pipeline.py` (progress callback + per-file log lines), `app/ingestion/jobs.py` (new: in-memory job registry), `app/api/routes.py`, `app/models/api.py`, `app/ingestion/__main__.py`, `tests/test_ingest_progress.py`
+  - Accept:
+    - Server log prints one line per file and stage, e.g. `[3/20] meeting_x.md: enriching… chunked (4) embedded ✓ 6.2s`
+    - `POST /api/ingest` returns a `job_id` right away (202) and runs in the background; `?wait=true` keeps the current blocking behaviour for scripts
+    - `GET /api/ingest/{job_id}` (and `GET /api/ingest/latest`) returns status (`running|completed|failed`), `processed/total`, current file and stage, elapsed time, ETA, and the partial report (ingested/skipped/failed)
+    - CLI shows a live per-file progress line
+    - Exercise 3 UI can poll the status endpoint to show a progress bar
+  - Verify: start an ingest with `{"force": true}`, poll `curl localhost:8000/api/ingest/latest | jq` and watch `processed` climb to `total`; the log shows per-file lines; `uv run pytest tests/test_ingest_progress.py`
+
+---
+
 ## Flags / decisions still open
-1. `data/` isn't in the repo yet. It's needed from task 1.3 (meetings) and 2.1 (documents).
+1. `data/meetings/` is partly present. The real transcripts reference products and people (e.g. Volta-7) that differ from the brief's Eagle-5/Falcon-7 context. The enrichment prompt is product-agnostic, but CLAUDE.md's company context should be reconciled once the dataset is final.
 2. Legacy `.doc/.ppt/.xls`: the LibreOffice shim is acceptable? (The dataset has none.)
 3. Office author metadata: verify core properties are populated when the data arrives.
 4. Business rules (2.5) are proposed, not specified by the brief. Confirm or adjust.
