@@ -6,7 +6,7 @@ A RAG knowledge system for the fictional FastChip Semiconductor, built as a take
 2. **Office docs**: add .docx/.pptx/.xlsx alongside meetings, with every fact traceable to its source file and author or attendees. Includes low-confidence routing (who to ask, why, draft question), capture of corrections and gaps, and quality instrumentation.
 3. **Web app**: a React chat app with streaming, guarded answers. It shows per-claim citations (hover for the source, click to open the document), derived metadata, an editable routing panel and a team-lead review queue. Extra pages cover Documents, Monitoring and Evals.
 
-The assignment brief is in [`take-home-assignment.md`](take-home-assignment.md). The plan and progress are in [`TASKS.md`](TASKS.md). Architecture, schemas and rules are in [`CLAUDE.md`](CLAUDE.md). The 30-day metric is in [`docs/MEASUREMENT.md`](docs/MEASUREMENT.md).
+The assignment brief is in [`take-home-assignment.md`](take-home-assignment.md). The plan and progress are in [`TASKS.md`](TASKS.md). Architecture, schemas and rules are in [`CLAUDE.md`](CLAUDE.md). The 30-day metric is in [`docs/MEASUREMENT.md`](docs/MEASUREMENT.md). How the project was built with Claude Code (decisions, corrections, verification) is in [`docs/AI_SESSION_LOG.md`](docs/AI_SESSION_LOG.md); the session context Claude kept (memory and plans) is in [`.claude/`](.claude/).
 
 ## Stack
 FastAPI (uv, Python 3.12) · LangChain · docling · ChromaDB + BM25 · SQLite · OpenAI (`gpt-4o-mini`, `text-embedding-3-small`) **or** local Ollama (`qwen2.5:7b`, `nomic-embed-text`) · React 19 + Vite + TypeScript + Tailwind
