@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routes import router
+from app.api import routes, routes_chat, routes_review
 from app.config import get_settings
 from app.db.sqlite import init_db
 from app.llm.factory import ConfigError
@@ -44,4 +44,5 @@ async def _provider_unreachable(_: Request, exc: Exception) -> JSONResponse:
     )
 
 
-app.include_router(router)
+for module in (routes, routes_chat, routes_review):
+    app.include_router(module.router)

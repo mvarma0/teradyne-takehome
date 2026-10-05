@@ -21,12 +21,17 @@ def _now() -> str:
 
 
 def _decode(row: dict, action_items: list[dict]) -> dict:
-    skip = {"enrichment_json", "extra_json"}
+    skip = {"enrichment_json", "extra_json", "content"}
     out = {k: v for k, v in row.items() if k not in _JSON_FIELDS and k not in skip}
     extra = json.loads(row.get("extra_json") or "{}")
     out["meeting_type"] = extra.get("meeting_type")
     out["location"] = extra.get("location")
     out["attendee_roles"] = extra.get("attendee_roles", {})
+    out["author_roles"] = extra.get("author_roles", {})
+    out["reviewers"] = extra.get("reviewers", [])
+    out["format"] = extra.get("format")
+    out["pages"] = extra.get("pages")
+    out["rules_applied"] = extra.get("rules_applied", [])
     for col, key in _JSON_FIELDS.items():
         out[key] = json.loads(row[col] or "[]")
     out["doc_id"] = out.pop("id")
@@ -58,8 +63,8 @@ def upsert_document(
             INSERT INTO documents (id, source_file, source_type, title, date, authors_json,
                 attendees_json, attendees_source, content_hash, collection, topic_domain, priority,
                 products_json, key_topics_json, summary, decisions_json, enrichment_json,
-                extra_json, n_chunks, ingested_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                extra_json, content, n_chunks, ingested_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET
                 source_file=excluded.source_file, source_type=excluded.source_type,
                 title=excluded.title, date=excluded.date, authors_json=excluded.authors_json,
@@ -69,7 +74,7 @@ def upsert_document(
                 priority=excluded.priority, products_json=excluded.products_json,
                 key_topics_json=excluded.key_topics_json, summary=excluded.summary,
                 decisions_json=excluded.decisions_json, enrichment_json=excluded.enrichment_json,
-                extra_json=excluded.extra_json,
+                extra_json=excluded.extra_json, content=excluded.content,
                 n_chunks=excluded.n_chunks, ingested_at=excluded.ingested_at
             """,
             (
@@ -91,6 +96,7 @@ def upsert_document(
                 json.dumps(enrichment.decisions),
                 enrichment.model_dump_json(),
                 json.dumps(src.extra),
+                src.content,
                 n_chunks,
                 _now(),
             ),
@@ -120,12 +126,14 @@ def get_documents(doc_ids: list[str]) -> dict[str, dict]:
         return {r["id"]: _decode(r, items.get(r["id"], [])) for r in rows}
 
 
-def list_documents(
+def _filter_sql(
     topic_domain: str | None = None,
     priority: str | None = None,
     source_type: str | None = None,
     person: str | None = None,
-) -> list[dict]:
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> tuple[str, list]:
     clauses, params = [], []
     for col, val in (
         ("topic_domain", topic_domain),
@@ -138,7 +146,30 @@ def list_documents(
     if person:
         clauses.append("(lower(attendees_json) LIKE ? OR lower(authors_json) LIKE ?)")
         params += [f"%{person.lower()}%"] * 2
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    # Undated documents never match a date range.
+    if date_from:
+        clauses.append("date >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("date <= ?")
+        params.append(date_to)
+    return (f"WHERE {' AND '.join(clauses)}" if clauses else ""), params
+
+
+def find_doc_ids(**filters: str | None) -> set[str]:
+    """Doc ids matching document-level filters (used to pre-filter retrieval)."""
+    where, params = _filter_sql(**filters)
+    with connect() as conn:
+        return {r["id"] for r in conn.execute(f"SELECT id FROM documents {where}", params)}
+
+
+def list_documents(
+    topic_domain: str | None = None,
+    priority: str | None = None,
+    source_type: str | None = None,
+    person: str | None = None,
+) -> list[dict]:
+    where, params = _filter_sql(topic_domain, priority, source_type, person)
     with connect() as conn:
         rows = conn.execute(
             f"SELECT * FROM documents {where} ORDER BY date, source_file", params
@@ -147,17 +178,20 @@ def list_documents(
         return [_decode(r, items.get(r["id"], [])) for r in rows]
 
 
-def list_doc_ids(source_type: str) -> list[str]:
+def list_all_doc_ids() -> list[str]:
     with connect() as conn:
-        rows = conn.execute(
-            "SELECT id FROM documents WHERE source_type = ?", (source_type,)
-        ).fetchall()
-        return [r["id"] for r in rows]
+        return [r["id"] for r in conn.execute("SELECT id FROM documents")]
 
 
 def delete_document(doc_id: str) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+
+
+def get_document_content(doc_id: str) -> str | None:
+    with connect() as conn:
+        row = conn.execute("SELECT content FROM documents WHERE id = ?", (doc_id,)).fetchone()
+    return row["content"] if row else None
 
 
 def count_documents() -> int:

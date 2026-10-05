@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.models.enrichment import ActionItem
@@ -22,32 +24,6 @@ class QueryRequest(BaseModel):
     generate_answer: bool = True
 
 
-class ChunkScores(BaseModel):
-    semantic: float | None = None
-    semantic_rank: int | None = None
-    bm25: float | None = None
-    bm25_rank: int | None = None
-    fused: float
-    rerank: float | None = None
-
-
-class ResultItem(BaseModel):
-    rank: int
-    chunk_id: str
-    doc_id: str
-    text: str
-    section: str | None
-    source_file: str
-    source_type: str
-    title: str
-    date: str | None
-    attendees: list[str]
-    topic_domain: str | None
-    priority: str | None
-    products: list[str]
-    scores: ChunkScores
-
-
 class DocumentMetadata(BaseModel):
     doc_id: str
     source_file: str
@@ -58,6 +34,11 @@ class DocumentMetadata(BaseModel):
     attendees_source: str | None
     attendee_roles: dict[str, str] = Field(default_factory=dict)
     authors: list[str]
+    author_roles: dict[str, str] = Field(default_factory=dict)
+    reviewers: list[str] = Field(default_factory=list)
+    format: str | None = None
+    pages: int | None = None
+    rules_applied: list[str] = Field(default_factory=list)
     meeting_type: str | None = None
     location: str | None = None
     topic_domain: str | None
@@ -71,21 +52,49 @@ class DocumentMetadata(BaseModel):
     ingested_at: str
 
 
-class RetrievalStats(BaseModel):
-    semantic_candidates: int
-    bm25_candidates: int
-    fused_candidates: int
-    reranker: str
-    latency_ms: int
-
-
-class QueryResponse(BaseModel):
-    query: str
-    answer: str | None
-    results: list[ResultItem]
-    documents: list[DocumentMetadata]
-    retrieval: RetrievalStats
-
-
 class IngestRequest(BaseModel):
     force: bool = Field(False, description="Re-enrich and re-embed even if unchanged")
+
+
+class ChatBody(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    conversation_id: str | None = None
+    filters: QueryFilters | None = None
+    top_k: int | None = Field(None, ge=1, le=20)
+    rerank: bool = True
+
+
+class CorrectBody(BaseModel):
+    correction: str = Field(min_length=1)
+    submitted_by: str | None = None
+
+
+class RejectBody(BaseModel):
+    reason: str | None = None
+    submitted_by: str | None = None
+
+
+class FeedbackBody(BaseModel):
+    rating: Literal["up", "down"] | None
+
+
+class SendRoutingBody(BaseModel):
+    question: str = Field(min_length=1)
+    sent_by: str | None = None
+
+
+class ReviewBody(BaseModel):
+    review_status: Literal["pending", "reviewed", "resolved"]
+    reviewer_note: str | None = None
+
+
+class RenameBody(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
+class EvalRunBody(BaseModel):
+    dataset: Literal["golden", "synthetic", "all"] = "golden"
+
+
+class SynthesizeBody(BaseModel):
+    n: int = Field(20, ge=1, le=100)

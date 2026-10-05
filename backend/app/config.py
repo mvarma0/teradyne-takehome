@@ -46,9 +46,21 @@ class Settings(BaseSettings):
     rerank_concurrency: int = 4
     rerank_max_chars: int = 1200
 
-    # Answer quality (used from Exercise 2)
+    # Answering, guardrails, routing
     confidence_threshold: float = 0.55
     min_retrieval_score: float = 0.25
+    history_messages: int = 6  # previous chat messages used for follow-ups
+    guardrails_llm: bool = True  # LLM input classifier (heuristics always run)
+    routing_max_people: int = 3
+
+    # Quality alerts (monitoring)
+    alert_min_answer_rate: float = 0.6
+    alert_max_negative_feedback_rate: float = 0.2
+    alert_min_mean_confidence: float = 0.5
+    alert_min_citation_valid_ratio: float = 0.9
+    alert_max_p95_latency_ms: int = 20000
+    alert_baseline_drop_pct: float = 0.15
+    alert_min_samples: int = 5
 
     # Storage
     data_dir: Path = BACKEND_DIR.parent / "data"
@@ -71,6 +83,10 @@ class Settings(BaseSettings):
     @property
     def meetings_dir(self) -> Path:
         return self.data_dir / "meetings"
+
+    @property
+    def documents_dir(self) -> Path:
+        return self.data_dir / "documents"
 
 
 @lru_cache(maxsize=1)

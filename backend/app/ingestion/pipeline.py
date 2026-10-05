@@ -1,21 +1,33 @@
-"""Ingestion: load -> enrich -> SQLite -> chunk -> Chroma. Idempotent per file content hash."""
+"""Ingestion: load -> enrich -> business rules -> chunk -> Chroma + SQLite.
+
+Sources: data/meetings/*.md and data/documents/**/*.{docx,pptx,xlsx,doc,ppt,xls}.
+Idempotent per file content hash; files removed from data/ are pruned.
+"""
 
 import logging
 import threading
 import time
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
+from app.answer.business_rules import apply_ingest_rules
 from app.config import get_settings
 from app.db import repository
 from app.ingestion.chunking import chunk_document
 from app.ingestion.enrich import enrich
 from app.ingestion.loaders.meeting import iter_meeting_files, load_meeting, make_doc_id
+from app.ingestion.loaders.office import iter_document_files, load_office
 from app.llm.factory import collection_name
+from app.models.source import SourceDoc
 from app.retrieval.bm25 import invalidate_bm25
 from app.retrieval.vectorstore import delete_doc_chunks, replace_doc_chunks
 
 log = logging.getLogger(__name__)
 _lock = threading.Lock()
+
+Loader = Callable[[Path, Path], SourceDoc]
 
 
 @dataclass
@@ -27,12 +39,31 @@ class IngestReport:
     removed: int = 0
     chunks_written: int = 0
     duration_s: float = 0.0
+    by_type: dict = field(default_factory=dict)
     ingested_files: list[str] = field(default_factory=list)
     failed: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+def discover_sources() -> tuple[list[tuple[Path, Loader]], list[str]]:
+    s = get_settings()
+    warnings = []
+    sources: list[tuple[Path, Loader]] = []
+    for folder, finder, loader in (
+        (s.meetings_dir, iter_meeting_files, load_meeting),
+        (s.documents_dir, iter_document_files, load_office),
+    ):
+        if not folder.is_dir():
+            warnings.append(f"Folder not found: {folder}")
+            continue
+        found = finder(folder)
+        if not found:
+            warnings.append(f"No supported files in {folder}")
+        sources += [(p, loader) for p in found]
+    return sources, warnings
 
 
 def run_ingestion(force: bool = False) -> IngestReport:
@@ -44,26 +75,34 @@ def run_ingestion(force: bool = False) -> IngestReport:
         _lock.release()
 
 
+def _ingest_one(src: SourceDoc, force: bool, collection: str) -> int:
+    enrichment = enrich(src, force=force)
+    enrichment, applied = apply_ingest_rules(src, enrichment)
+    if applied:
+        src.extra["rules_applied"] = applied
+    chunks = chunk_document(src, enrichment)
+    replace_doc_chunks(src.doc_id, chunks)
+    repository.upsert_document(src, enrichment, collection, len(chunks))
+    return len(chunks)
+
+
 def _run(force: bool) -> IngestReport:
     s = get_settings()
     started = time.perf_counter()
     report = IngestReport(collection=collection_name())
-
-    files = iter_meeting_files(s.meetings_dir)
-    report.files_found = len(files)
-    if not s.meetings_dir.is_dir():
-        report.warnings.append(f"Meetings folder not found: {s.meetings_dir}")
-    elif not files:
-        report.warnings.append(f"No .md files in {s.meetings_dir}")
+    sources, report.warnings = discover_sources()
+    report.files_found = len(sources)
+    types: Counter = Counter()
 
     seen: set[str] = set()
-    for path in files:
+    for i, (path, loader) in enumerate(sources, start=1):
         rel = path.relative_to(s.data_dir).as_posix()
-        doc_id = make_doc_id(rel)
-        seen.add(doc_id)
+        seen.add(make_doc_id(rel))
         try:
-            src = load_meeting(path, s.data_dir)
-            state = repository.get_document_state(doc_id)
+            src = loader(path, s.data_dir)
+            types[src.source_type] += 1
+            report.warnings += src.extra.pop("warnings", [])
+            state = repository.get_document_state(src.doc_id)
             unchanged = (
                 state
                 and state["content_hash"] == src.content_hash
@@ -71,29 +110,29 @@ def _run(force: bool) -> IngestReport:
             )
             if unchanged and not force:
                 report.skipped_unchanged += 1
+                log.info("[%d/%d] %s unchanged, skipped", i, len(sources), rel)
                 continue
-            enrichment = enrich(src, force=force)
-            chunks = chunk_document(src, enrichment)
-            replace_doc_chunks(doc_id, chunks)
-            repository.upsert_document(src, enrichment, report.collection, len(chunks))
+            t0 = time.perf_counter()
+            n = _ingest_one(src, force, report.collection)
             report.ingested += 1
-            report.chunks_written += len(chunks)
+            report.chunks_written += n
             report.ingested_files.append(rel)
-            if src.attendees_source in ("speakers", "none"):
-                report.warnings.append(
-                    f"{rel}: no attendee list found (attendees from {src.attendees_source})"
-                )
+            log.info(
+                "[%d/%d] %s: %d chunks (%.1fs)", i, len(sources), rel, n, time.perf_counter() - t0
+            )
+            if src.attendees_source == "none":
+                report.warnings.append(f"{rel}: no attendees/authors found")
         except Exception as exc:  # keep going; report per-file failures
             log.exception("failed to ingest %s", rel)
             report.failed.append({"file": rel, "error": f"{type(exc).__name__}: {exc}"})
 
-    # Prune documents whose source file no longer exists.
-    for stale in set(repository.list_doc_ids("meeting")) - seen:
+    for stale in set(repository.list_all_doc_ids()) - seen:
         delete_doc_chunks(stale)
         repository.delete_document(stale)
         report.removed += 1
 
     invalidate_bm25()
+    report.by_type = dict(types)
     report.duration_s = round(time.perf_counter() - started, 2)
     log.info("ingestion finished: %s", report)
     return report

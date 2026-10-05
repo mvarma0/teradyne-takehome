@@ -1,5 +1,7 @@
 # TASKS
 
+Status legend: `[x]` done (verified) · `[~]` in progress · `[ ]` to do.
+
 Execute in order. Each task lists **Input** (what must exist), **Files** (what it creates or modifies), **Accept** (acceptance criteria) and **Verify** (the command or check). Mark `[x]` only after Verify passes. Commands assume `backend/` or `frontend/` as cwd unless noted.
 
 ---
@@ -64,6 +66,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Files: `app/retrieval/bm25.py`, `app/retrieval/hybrid.py`, `app/retrieval/rerank.py`, `app/retrieval/types.py`
   - Accept: semantic + BM25 candidates, weighted RRF, pointwise LLM rerank (`RERANKER=llm|none`); filters on topic/priority/source_type (Chroma `where`) and person/date range; per-result scores exposed
   - Verify: `uv run pytest tests/test_retrieval_units.py`; integration test checks exact-term BM25 hits and the person filter
+  - Status: Done; later improved: person/date filters are now true pre-filters (resolved to doc ids in SQLite → `doc_id $in` in Chroma, BM25 limited to the same set).
 
 - [x] **1.8 API**
   - Files: `app/api/routes.py`, `app/answer/generate.py`, `app/answer/service.py`, `app/models/api.py`, `app/main.py`
@@ -76,130 +79,165 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
 
 - [ ] **1.10 Real-data run** (when `data/meetings/` is complete)
   - Verify: `POST /api/ingest` → `files_found` = 20, `failed` = []; check `warnings` for files without attendee lists; spot-check `GET /api/documents` topics/priorities; run `./scripts/smoke_ex1.sh`
+  - Status: To do: waiting for the full real-data run (`data/` now has 20 meetings + 15 documents).
 
 ---
 
 ## Exercise 2: Office docs, traceability, routing, gaps, instrumentation
 
-- [ ] **2.1 DOCX loader**
+- [x] **2.1 DOCX loader**
   - Input: 1.9, `data/documents/docx/`
   - Files: `app/ingestion/loaders/docx.py`, `tests/test_docx_loader.py` (fixture generated in the test)
   - Accept: paragraphs + tables as text; author from core_properties → body "Author:/Owner:" → "unknown"; date from core props
   - Verify: pytest; `uv run python -m app.ingestion --dry-run --only documents` lists 5 docx with authors
+  - Status: Done: implemented as one docling-based Office loader (`app/ingestion/loaders/office.py`) covering docx/pptx/xlsx. Author/title/date/reviewers come from core properties or body bylines. Verified by `tests/test_office_and_rules.py`.
 
-- [ ] **2.2 PPTX loader**
+- [x] **2.2 PPTX loader**
   - Files: `app/ingestion/loaders/pptx.py`, `tests/test_pptx_loader.py`
   - Accept: one section per slide (title, text, notes) with location `slide N`; author
   - Verify: pytest; dry-run lists 5 pptx
+  - Status: Done: in `office.py`, one `## Slide N` section per slide plus speaker notes. The dataset's .pptx files are plain text, so they go through the text fallback and are flagged in the report.
 
-- [ ] **2.3 XLSX loader**
+- [x] **2.3 XLSX loader**
   - Files: `app/ingestion/loaders/xlsx.py`, `tests/test_xlsx_loader.py`
   - Accept: per sheet, rows rendered as `header: value` lines with location `Sheet!rows a-b`; creator as author
   - Verify: pytest; dry-run lists 5 xlsx
+  - Status: Done: in `office.py`, one `## Sheet: name` section per sheet (docling markdown tables); tables split by rows with the header repeated (`chunking.py`).
 
-- [ ] **2.4 Legacy formats + unified pipeline**
+- [~] **2.4 Legacy formats + unified pipeline**
   - Files: `app/ingestion/loaders/legacy.py`, `app/ingestion/loaders/__init__.py` (extension registry), `app/ingestion/pipeline.py`, `app/ingestion/chunking.py` (keep location metadata)
   - Accept: `.doc/.ppt/.xls` converted with `soffice --headless --convert-to` if available, else skipped with a warning; all types share one SourceDoc/enrichment path
   - Verify: `uv run python -m app.ingestion` → 35 docs; `curl -s 'localhost:8000/api/documents?source_type=xlsx' | jq length` → 5
+  - Status: In progress: legacy shim and unified pipeline done, verified on fixtures plus mock Office files (7 docs). Still open: the 35-document check on the full real dataset.
 
-- [ ] **2.5 Business rules**
+- [x] **2.5 Business rules**
   - Files: `app/answer/business_rules.py`, `tests/test_business_rules.py`, hook into `enrich.py`
   - Accept: (a) people only from source; (b) claims without valid citations dropped; (c) priority escalated to critical for customer escalation / AEC-Q100 or safety / line-down; (d) one taxonomy across types; (e) newer source preferred on conflict, conflict surfaced
   - Verify: `uv run pytest tests/test_business_rules.py`
+  - Status: Done: R1-R6 in `app/answer/business_rules.py` / `citations.py`; tests in `tests/test_office_and_rules.py`, plus the integration test asserting the escalation meeting becomes critical.
 
-- [ ] **2.6 Cited answer chain**
+- [x] **2.6 Cited answer chain**
   - Files: `app/answer/generate.py`, `app/answer/citations.py`, `tests/test_answer.py`, `app/api/routes_query.py`
   - Accept: the LLM returns `claims[{text, citations[n]}]` + an answerability score; the validator drops claims citing unknown chunks; every citation carries source_file, source_type, location, authors/attendees, date, snippet, score
   - Verify: pytest; the curl query shows every claim with ≥1 citation that has source_file + a person
+  - Status: Done: streamed answer + post-hoc claim extraction/validation (`app/answer/chat.py`, `citations.py`). Uncited claims are dropped; citations carry file, people, section, date, snippet and scores.
 
-- [ ] **2.7 Confidence scoring**
+- [x] **2.7 Confidence scoring**
   - Files: `app/answer/confidence.py`, `tests/test_confidence.py`
   - Accept: weighted score from top/mean retrieval score, citation coverage and LLM answerability; `confident = score >= CONFIDENCE_THRESHOLD`
   - Verify: pytest; `curl ... -d '{"query":"What is on the cafeteria menu?"}'` → `confident:false`
+  - Status: Done: `app/answer/confidence.py` (retrieval + rerank + citation coverage, with caps). Off-topic questions are now handled by guardrails before retrieval.
 
-- [ ] **2.8 Query logging**
+- [x] **2.8 Query logging**
   - Files: `app/db/schema.sql` (+queries), `app/feedback/queries.py`, `app/api/routes_query.py` (`GET /api/query/{id}`)
   - Accept: every query is persisted; the response includes `query_id`
   - Verify: POST a query, then `curl localhost:8000/api/query/<id>` returns the same answer
+  - Status: Done: stored as assistant rows in the `messages` table (message id = query id); `GET /api/query/{id}`.
 
-- [ ] **2.9 Routing engine**
+- [x] **2.9 Routing engine**
   - Files: `app/routing/people.py`, `app/routing/router.py`, `app/db/schema.sql` (+routing_suggestions), `tests/test_router.py`
   - Accept: candidates from authors, attendees and action-item owners of retrieved docs, scored by retrieval relevance and enriched with role/dept; `reason` names the matched files and snippets; LLM-drafted question addressed to that person; persisted
   - Verify: pytest; a query like "What is the Falcon-7 thermal margin at 150°C junction?" returns routing to the relevant design/test people with file-based reasons
+  - Status: Done: `app/routing/router.py` (authors, reviewers, attendees, action-item owners; LLM draft with template fallback). Roles come from the parsed data rather than a static people.py.
 
-- [ ] **2.10 Low-confidence routing + reject**
+- [x] **2.10 Low-confidence routing + reject**
   - Files: `app/db/schema.sql` (+gaps), `app/feedback/gaps.py`, `app/api/routes_query.py` (`POST /api/query/{id}/reject`)
   - Accept: a low-confidence query → routing in the response + a `low_confidence` gap; reject → a `rejected` gap + routing returned; query status updated
   - Verify: `curl -XPOST localhost:8000/api/query/<id>/reject -d '{"reason":"wrong lot","submitted_by":"me"}' -H 'content-type: application/json'`, then `curl localhost:8000/api/gaps`
+  - Status: Done: low confidence → routing + gap; `POST /api/query/{id}/reject` → gap + routing. Verified by the integration test.
 
-- [ ] **2.11 Corrections + gaps API**
+- [x] **2.11 Corrections + gaps API**
   - Files: `app/api/routes_gaps.py`, `app/api/routes_query.py` (`/correct`), `tests/test_gaps.py`
   - Accept: a correction stored with the original query, answer and citations; `GET /api/gaps?type=&status=`, `GET /api/gaps/{id}`
   - Verify: pytest; curl correct → it appears in `/api/gaps?type=correction`
+  - Status: Done: `/correct`, `/api/gaps`, `/api/gaps/{id}` (`app/feedback/actions.py`, `app/db/feedback_repo.py`). Verified by the integration test.
 
-- [ ] **2.12 Review queue + routing send**
+- [x] **2.12 Review queue + routing send**
   - Files: `app/feedback/review.py`, `app/api/routes_review.py`, `app/api/routes_routing.py`, `tests/test_review.py`
   - Accept: the queue combines gaps (and their routing) sorted pending-first; PATCH sets reviewed/resolved + note; `POST /api/routing/{id}/send` stores the edited question, status=sent (log only)
   - Verify: curl flow reject → send → `GET /api/review-queue` shows the item → `PATCH /api/review-queue/<id> -d '{"review_status":"reviewed","reviewer_note":"ok"}'`
+  - Status: Done: `/api/review-queue` (+PATCH), `/api/routing/{id}/send` and `/dismiss` (log only). Verified by the integration test.
 
-- [ ] **2.13 Instrumentation**
+- [x] **2.13 Instrumentation**
   - Files: `app/observability/logging.py` (JSON logs), `app/observability/metrics.py`, `app/db/schema.sql` (+metrics), `app/api/routes_metrics.py`, `tests/test_metrics.py`
   - Accept: per-query metrics recorded; `GET /api/metrics` returns 24h/7d answer rate, routed rate, reject+correction rate, mean confidence, mean top score, citation validity, p95 latency, plus `alerts[]` when a value crosses an `ALERT_*` threshold or drops >X% vs the 7d baseline
   - Verify: fire about 10 queries, then `curl localhost:8000/api/metrics | jq`
+  - Status: Done: `app/observability/metrics.py`; `/api/metrics?window=24h|7d|30d` with baseline comparison and alerts. JSON logging not added; standard logging with per-file progress lines.
 
-- [ ] **2.14 Golden eval set**
+- [~] **2.14 Golden eval set**
   - Files: `eval/golden.jsonl` (~20 questions → expected source files, written from the real data), `eval/run_eval.py`
   - Accept: reports hit@k, MRR, citation validity and answerability on unanswerable controls; non-zero exit below the target (used as a regression gate); calibrate `CONFIDENCE_THRESHOLD`
   - Verify: `uv run python -m eval.run_eval` prints the report; hit@5 ≥ 0.8
+  - Status: In progress: `eval/golden.jsonl` (11 questions from one docx + 3 controls), runner in `app/evals/` (`uv run python -m app.evals`), synthetic generator. Synthetic run verified on demo data. Still open: the golden run on real data and threshold calibration.
 
-- [ ] **2.15 Ex2 smoke** ✅ CHECKPOINT
+- [x] **2.15 Ex2 smoke** ✅ CHECKPOINT
   - Files: `scripts/smoke_ex2.sh`
   - Accept: covers a meeting + office answer, citations with people, a low-confidence routing, reject, correct, gaps, review queue and metrics
   - Verify: `uv run pytest` && `./scripts/smoke_ex2.sh` green
+  - Status: Done (on fixtures + mock Office files): `./scripts/smoke_ex2.sh` all checks passed against a live server, and the Ollama integration test passes. Re-run on real data with 1.10 / 2.4.
 
 ---
 
 ## Exercise 3: Web application
 
-- [ ] **3.1 API client + layout**
+- [x] **3.1 API client + layout**
   - Files: `src/types.ts`, `src/api/client.ts`, `src/App.tsx` (nav: Ask / Review Queue / Metrics), `src/main.tsx`
   - Accept: typed functions for every endpoint; simple tab/route navigation
   - Verify: `npm run build`; nav renders
+  - Status: Done: `src/api/client.ts` (typed client + SSE parser), `src/types.ts`, `src/App.tsx` (nav: Chat, Documents, Review queue, Monitoring, Evals; dark mode).
 
-- [ ] **3.2 Ask page**
+- [x] **3.2 Ask page**
   - Files: `src/pages/AskPage.tsx`, `src/components/FilterBar.tsx`
   - Accept: query input, filters (topic, priority, source type), loading/error states
   - Verify: asking a question shows the response in the browser
+  - Status: Done: implemented as a streaming Chat page (`src/pages/ChatPage.tsx`) with conversation history and filters.
 
-- [ ] **3.3 Answer with citations + metadata**
+- [x] **3.3 Answer with citations + metadata**
   - Files: `src/components/AnswerCard.tsx`, `CitationChip.tsx`, `SourceList.tsx`, `MetadataBadges.tsx`
   - Accept: every claim shows inline chips; hover/click shows file, location, author/attendees, snippet; badges for topic/priority/products/date; confidence indicator
   - Verify: in the browser, each claim has ≥1 chip showing file + person
+  - Status: Done: inline citation chips with hover card + click-to-open document drawer with the chunk highlighted; metadata badges and confidence (`src/components/citations.tsx`, `chat.tsx`).
 
-- [ ] **3.4 Correct / reject**
+- [x] **3.4 Correct / reject**
   - Files: `src/components/CorrectionDialog.tsx`, `AnswerCard.tsx`
   - Accept: correct (text) and reject (reason) post to the API; a confirmation shows; reject reveals routing
   - Verify: the submission appears in `curl localhost:8000/api/gaps`
+  - Status: Done: Correct / Reject dialogs plus thumbs up/down.
 
-- [ ] **3.5 Routing panel**
+- [x] **3.5 Routing panel**
   - Files: `src/components/RoutingPanel.tsx`
   - Accept: shows who/role/why/matched sources; editable draft question; Send → log; sent state shown
   - Verify: edit + send → the routing status is `sent` in the API/review queue
+  - Status: Done: routing panel with editable draft, Send (logged), Copy, Dismiss.
 
-- [ ] **3.6 Review queue page**
+- [x] **3.6 Review queue page**
   - Files: `src/pages/ReviewQueuePage.tsx`
   - Accept: table of gaps/corrections/routings with the original query, answer, correction and sent question; filter by type/status; mark reviewed/resolved with a note
   - Verify: PATCH persists after a page refresh
+  - Status: Done: `src/pages/ReviewPage.tsx` (counts, filters, expandable items, review/resolve/reopen with note).
 
-- [ ] **3.7 Metrics page**
+- [x] **3.7 Metrics page**
   - Files: `src/pages/MetricsPage.tsx`
   - Accept: KPI tiles for 24h/7d + alert banners
   - Verify: values match `curl /api/metrics`
+  - Status: Done: `src/pages/MonitoringPage.tsx` (alerts, KPI tiles vs previous window, trend charts).
 
-- [ ] **3.8 Measurement doc + README** ✅ CHECKPOINT
+- [x] **3.8 Measurement doc + README** ✅ CHECKPOINT
   - Files: `docs/MEASUREMENT.md`, `README.md`, `Makefile` (or `scripts/dev.sh`)
   - Accept: one-paragraph 30-day metric (proposed: verified-answer rate, from the queries/gaps tables with a weekly golden-set control); README covers setup, ingest, run both, smoke tests and a demo script
   - Verify: follow the README from a clean clone; the full demo flow works in the browser
+  - Status: Done: `docs/MEASUREMENT.md`, root and backend READMEs, `dev.sh` starts both servers.
+
+---
+
+## Additional scope (requested during Exercise 3)
+
+- [x] **E1 Conversational chat with SSE streaming**: `POST /api/chat/stream`, follow-up rewriting from history, conversations persisted in SQLite (`/api/conversations`)
+- [x] **E2 Guardrails**: prompt-injection heuristics + LLM input classifier (off-topic / small talk), PII redaction on the token stream, grounding (uncited claims dropped)
+- [x] **E3 Documents page + viewer**: list/search/filter, ingest button with report, viewer with metadata, chunks, business rules applied, original download
+- [x] **E4 Evals page**: run golden/synthetic sets, generate a synthetic set, live progress, summary vs targets, per-case table, trend across runs
+- [x] **E5 Monitoring page**: KPI tiles, alerts, trend charts (validated chart palette)
+- [x] **E6 UI walkthrough**: Playwright run over every page on demo data, no console errors
 
 ---
 
@@ -210,12 +248,25 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Input: 1.6 pipeline, 1.8 API
   - Files: `app/ingestion/pipeline.py` (progress callback + per-file log lines), `app/ingestion/jobs.py` (new: in-memory job registry), `app/api/routes.py`, `app/models/api.py`, `app/ingestion/__main__.py`, `tests/test_ingest_progress.py`
   - Accept:
+  - Status: Partial: per-file `[i/N]` log lines exist; the job status API and UI progress are still to do.
     - Server log prints one line per file and stage, e.g. `[3/20] meeting_x.md: enriching… chunked (4) embedded ✓ 6.2s`
     - `POST /api/ingest` returns a `job_id` right away (202) and runs in the background; `?wait=true` keeps the current blocking behaviour for scripts
     - `GET /api/ingest/{job_id}` (and `GET /api/ingest/latest`) returns status (`running|completed|failed`), `processed/total`, current file and stage, elapsed time, ETA, and the partial report (ingested/skipped/failed)
     - CLI shows a live per-file progress line
     - Exercise 3 UI can poll the status endpoint to show a progress bar
   - Verify: start an ingest with `{"force": true}`, poll `curl localhost:8000/api/ingest/latest | jq` and watch `processed` climb to `total`; the log shows per-file lines; `uv run pytest tests/test_ingest_progress.py`
+
+- [ ] **B2 Infer metadata filters from the question (self-query)**
+  - Problem: pre-filtering only applies when the caller sends `filters` explicitly. "What did Lisa say about yield in January 2024?" searches all meetings instead of Lisa's January yield meetings.
+  - Input: 1.7 pre-filtering (`plan_filters()` in `app/retrieval/hybrid.py`, `repository.find_doc_ids()`)
+  - Files: `app/retrieval/filter_extraction.py` (new), `app/retrieval/hybrid.py`, `app/models/api.py`, `app/config.py`, `tests/test_filter_extraction.py`
+  - Accept:
+    - An LLM structured-output step pulls `topic_domain`, `priority`, `person`, `date_from`/`date_to` out of the question (relative dates like "January" resolved against the corpus date range)
+    - Guardrails: a person is kept only if it matches a known attendee in SQLite; topic/priority only if they're valid enum values; if the inferred filters match zero documents, fall back to an unfiltered search instead of returning nothing
+    - Explicit `filters` in the request always win over inferred ones
+    - Config `INFER_FILTERS=true|false` (default true) plus per-request `"infer_filters": false`
+    - Response includes `retrieval.applied_filters` and `retrieval.filters_source` (`explicit|inferred|none`), so the UI can show and clear inferred filters
+  - Verify: `uv run pytest tests/test_filter_extraction.py`; `curl -XPOST localhost:8000/api/query -d '{"query":"What did Lisa say in January 2024?"}'` shows `applied_filters.person` = "Lisa Park" and only her meetings in `results`; a question naming an unknown person returns unfiltered results with `filters_source: "none"`
 
 ---
 

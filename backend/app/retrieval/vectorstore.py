@@ -51,3 +51,17 @@ def semantic_search(query: str, k: int, where: dict | None) -> list[tuple[Docume
         return []
     pairs = get_vectorstore().similarity_search_with_score(query, k=k, filter=where)
     return [(doc, 1.0 - dist) for doc, dist in pairs]
+
+
+def doc_chunks(doc_id: str) -> list[dict]:
+    got = get_vectorstore().get(where={"doc_id": doc_id}, include=["documents", "metadatas"])
+    rows = [
+        {
+            "chunk_id": i,
+            "chunk_index": m.get("chunk_index", 0),
+            "section": m.get("section"),
+            "text": d.split("\n", 1)[-1],
+        }
+        for i, d, m in zip(got["ids"], got["documents"], got["metadatas"], strict=True)
+    ]
+    return sorted(rows, key=lambda r: r["chunk_index"])

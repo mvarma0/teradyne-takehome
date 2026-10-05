@@ -1,6 +1,6 @@
 # FastChip Knowledge API (backend)
 
-FastAPI service that ingests meeting transcripts from `data/meetings/`, derives structured metadata, stores it in **SQLite** + **ChromaDB**, and answers natural-language queries with hybrid retrieval (semantic + BM25 → RRF → LLM rerank).
+FastAPI service that ingests meeting transcripts (`data/meetings/`) and Office documents (`data/documents/`) and derives structured metadata, stored in **SQLite** + **ChromaDB**. It answers natural-language questions with hybrid retrieval (semantic + BM25 → RRF → LLM rerank), guardrails, validated citations, confidence scoring and routing. It also captures gaps and corrections, records quality metrics and runs evals.
 
 ---
 
@@ -101,7 +101,13 @@ EMBEDDING_MODEL=nomic-embed-text
 | `RERANK_TOP_N` | `10` | Fused candidates sent to the reranker |
 | `RERANK_CONCURRENCY` | `4` | Parallel rerank calls |
 | `RERANK_MAX_CHARS` | `1200` | Passage length sent to the reranker |
-| `DATA_DIR` | `../data` | Source data; meetings are read from `DATA_DIR/meetings` |
+| `CONFIDENCE_THRESHOLD` | `0.55` | Below this an answer is low confidence → routing + gap |
+| `MIN_RETRIEVAL_SCORE` | `0.25` | A weak top semantic match caps confidence |
+| `HISTORY_MESSAGES` | `6` | Chat messages used to rewrite follow-up questions |
+| `GUARDRAILS_LLM` | `true` | LLM input classifier (injection heuristics always run) |
+| `ROUTING_MAX_PEOPLE` | `3` | Routing suggestions per answer |
+| `ALERT_*` | see `.env.example` | Monitoring thresholds (answer rate, confidence, citation validity, negative feedback, p95 latency, baseline drop, min samples) |
+| `DATA_DIR` | `../data` | Source data: `DATA_DIR/meetings` and `DATA_DIR/documents` |
 | `CHROMA_DIR` | `./storage/chroma` | ChromaDB persistence |
 | `CHROMA_COLLECTION` | `fastchip` | Collection prefix (the embedding model is appended) |
 | `SQLITE_PATH` | `./storage/app.db` | SQLite database |
@@ -122,157 +128,93 @@ uv run uvicorn app.main:app --reload
 
 ---
 
-## 4. Ingestion (load → enrich → chunk → embed → store)
+## 4. Ingestion (load → enrich → rules → chunk → embed → store)
 
-### Trigger through the API
-
-```bash
-curl -X POST localhost:8000/api/ingest
-```
-
-Force re-processing of every file (re-enrich + re-embed):
+Sources: `data/meetings/*.md` and `data/documents/**/*.{docx,pptx,xlsx,doc,ppt,xls}`.
 
 ```bash
-curl -X POST localhost:8000/api/ingest \
-  -H 'content-type: application/json' -d '{"force": true}'
+curl -X POST localhost:8000/api/ingest                                   # new / changed files
+curl -X POST localhost:8000/api/ingest -H 'content-type: application/json' -d '{"force": true}'
+uv run python -m app.ingestion [--force] [--dry-run]                     # CLI; dry-run = parse + chunk, no models
 ```
+You can also click **Ingest** on the app's Documents page.
 
-### Trigger from the command line (no server needed)
-
-```bash
-uv run python -m app.ingestion            # ingest
-uv run python -m app.ingestion --force    # re-process everything
-uv run python -m app.ingestion --dry-run  # parse + chunk only, no model calls (inspect parsing)
-```
-
-### Response
-
-```json
-{
-  "collection": "fastchip__ollama-nomic-embed-text",
-  "files_found": 20,
-  "ingested": 20,
-  "skipped_unchanged": 0,
-  "removed": 0,
-  "chunks_written": 61,
-  "duration_s": 74.2,
-  "ingested_files": ["meetings/..."],
-  "failed": [],
-  "warnings": []
-}
-```
-
-- **Idempotent:** a file is skipped if its content and the active collection are unchanged.
-- **Pruning:** files deleted from `data/meetings` are removed from Chroma and SQLite.
-- **Failures** are reported per file and don't stop the run.
-- **`warnings`** list files where no attendee list was found.
-- A second ingest started while one is running returns **409**.
-
-### What happens per file
+The report includes `files_found`, `ingested`, `skipped_unchanged`, `removed`, `chunks_written`, `by_type`, `failed[]` and `warnings[]`. Warnings flag Office files that aren't real OOXML (parsed as text) and files with no attendees or authors. The server log prints one `[i/N] file: n chunks (s)` line per file.
 
 | Step | Code |
 |---|---|
-| Parse title, date, attendees (+roles), meeting type, location; no LLM involved | `app/ingestion/loaders/meeting.py` |
-| Promote section labels to headings, keep speaker turns, docling → markdown | `app/ingestion/docling_md.py` |
-| LLM enrichment: topic_domain, priority, products, summary, key_topics, decisions, action_items (cached) | `app/ingestion/enrich.py` |
-| Structure-aware recursive chunking | `app/ingestion/chunking.py` |
-| Embed + store chunks in ChromaDB | `app/retrieval/vectorstore.py` |
-| Store document metadata + action items in SQLite | `app/db/repository.py` |
-| Orchestration | `app/ingestion/pipeline.py` |
+| Meetings: title, date, attendees + roles, meeting type, location (deterministic, no LLM) | `app/ingestion/loaders/meeting.py` |
+| Office: docling content per slide (`## Slide N` + speaker notes) / sheet (`## Sheet: name`); author, reviewers, title and date from core properties or body bylines (`**Author:** Name, Role`); non-OOXML → text fallback; legacy formats via LibreOffice | `app/ingestion/loaders/office.py` |
+| LLM enrichment (topic, priority, products, summary, key topics, decisions, action items), cached | `app/ingestion/enrich.py` |
+| Business rules R1-R3 (priority floor, owners and products must appear in the source) | `app/answer/business_rules.py` |
+| Structure-aware recursive chunking; tables split by rows with the header repeated | `app/ingestion/chunking.py` |
+| Embed + store in Chroma; metadata + content in SQLite | `app/retrieval/vectorstore.py`, `app/db/repository.py` |
 
-**Chunking strategy:**
-1. Split on markdown headings so chunks never cross sections.
-2. Merge sections smaller than `CHUNK_MIN_TOKENS`.
-3. Split only sections larger than `CHUNK_MAX_TOKENS`, recursively by paragraph/speaker turn, then line, sentence, clause and word.
-
-Each chunk starts with a context line (`[title | date | section]`).
+Ingestion is idempotent per content hash and active collection, and deleted files are pruned.
 
 ---
 
-## 5. Query
+## 5. Asking questions
 
-### Trigger
-
+### Streaming chat (used by the web app)
 ```bash
-curl -s -X POST localhost:8000/api/query \
-  -H 'content-type: application/json' \
-  -d '{"query": "What caused the low first-silicon yield and who owns the fix?"}' | jq
+curl -N -X POST localhost:8000/api/chat/stream -H 'content-type: application/json' \
+  -d '{"message": "What caused the low first-silicon yield?", "conversation_id": null}'
 ```
+Server-Sent Events, in order:
 
-### Request fields
+| Event | Data |
+|---|---|
+| `conversation` | `{conversation_id, title}` (pass `conversation_id` back for follow-ups) |
+| `status` | `{stage: guardrails \| retrieving \| generating \| routing, query?}` |
+| `guardrail` | `{category: knowledge_question \| small_talk \| off_topic \| prompt_injection, reason, method}` |
+| `sources` | `{citations[], documents[]}`, sent before any tokens |
+| `token` | `{text}`, streamed and PII-redacted |
+| `final` | the validated answer payload (below); replaces the streamed text |
+| `error` | `{detail}` |
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `query` | string | (required) | Natural-language question |
-| `filters.topic_domain` | string | — | e.g. `yield`, `design`, `test_engineering`, `npi_program`, `supply_chain`, `customer`, `quality_compliance`, `executive_strategy`, `other` |
-| `filters.priority` | string | — | `critical`, `high`, `medium`, `low`, `none` |
-| `filters.source_type` | string | — | `meeting` |
-| `filters.person` | string | — | Attendee name, case-insensitive substring |
-| `filters.date_from` / `filters.date_to` | ISO date | — | Inclusive date range |
-| `top_k` | int 1–20 | `TOP_K` | Number of results |
-| `rerank` | bool | `true` | Apply LLM reranking |
-| `generate_answer` | bool | `true` | Generate an answer with `[n]` citations |
-
-Example with filters:
-
+### Single-shot
 ```bash
-curl -s -X POST localhost:8000/api/query -H 'content-type: application/json' -d '{
-  "query": "open action items",
-  "filters": {"topic_domain": "yield", "person": "Lisa", "date_from": "2024-01-01"},
-  "top_k": 5
-}' | jq
+curl -s -X POST localhost:8000/api/query -H 'content-type: application/json' \
+  -d '{"query": "Who owns the HTOL failure analysis?", "filters": {"source_type": "docx"}}' | jq
 ```
+Body fields:
+- `query`
+- `filters`: `topic_domain`, `priority`, `source_type` (meeting | docx | pptx | xlsx), `person`, `date_from`, `date_to`
+- `top_k`, `rerank`
+- `generate_answer`: `false` returns retrieval only
 
-### Response
+All filters are pre-filters, applied before ranking.
 
+### Answer payload (`final` event / `/api/query`)
 ```json
 {
-  "query": "...",
-  "answer": "First-silicon yield was 41.2% ... [1][2]",
-  "results": [
-    {
-      "rank": 1,
-      "chunk_id": "a1b2...:003",
-      "doc_id": "a1b2...",
-      "text": "[Meeting title | 2024-01-15 | Discussion]\n...",
-      "section": "Discussion",
-      "source_file": "meetings/meeting_....md",
-      "source_type": "meeting",
-      "title": "...",
-      "date": "2024-01-15",
-      "attendees": ["..."],
-      "topic_domain": "yield",
-      "priority": "high",
-      "products": ["..."],
-      "scores": {"semantic": 0.71, "semantic_rank": 1, "bm25": 4.2, "bm25_rank": 2,
-                 "fused": 0.032, "rerank": 9.0}
-    }
-  ],
-  "documents": [
-    {"doc_id": "...", "source_file": "...", "title": "...", "date": "...",
-     "attendees": ["..."], "attendee_roles": {"Name": "Role"}, "meeting_type": "...",
-     "location": "...", "topic_domain": "...", "priority": "...", "products": ["..."],
-     "key_topics": ["..."], "summary": "...", "decisions": ["..."],
-     "action_items": [{"owner": "...", "task": "...", "due_date": "..."}], "n_chunks": 3,
-     "ingested_at": "..."}
-  ],
-  "retrieval": {"semantic_candidates": 20, "bm25_candidates": 14, "fused_candidates": 20,
-                "reranker": "llm", "latency_ms": 1850}
+  "query_id": "…", "conversation_id": "…", "query": "…", "standalone_query": "…",
+  "answer": "First-silicon yield was 41.2% [1] …",
+  "claims": [{"text": "…", "citations": [1], "kind": "fact", "supported": true}],
+  "dropped_claims": ["uncited statement removed by rule R5"],
+  "citations": [{"n": 1, "chunk_id": "…", "doc_id": "…", "source_file": "documents/docx/….docx",
+                 "source_type": "docx", "title": "…", "section": "…", "date": "2024-03-31",
+                 "people": ["James Ortiz"], "people_label": "Author", "attendees": [], "authors": ["James Ortiz"],
+                 "topic_domain": "yield", "priority": "high", "products": ["Volta-7"],
+                 "snippet": "…", "scores": {"semantic": 0.71, "bm25": 4.2, "fused": 0.03, "rerank": 9}}],
+  "cited": [1], "documents": [{"…": "derived metadata per source document"}],
+  "confidence": 0.78, "confident": true,
+  "status": "answered | routed | refused | blocked",
+  "routing": [{"routing_id": "…", "person": "…", "role": "…", "reason": "…", "matched_sources": [], "draft_question": "…"}],
+  "guardrails": {"category": "knowledge_question", "pii_redactions": 0, "uncited_dropped": 1},
+  "latency_ms": 2100, "first_token_ms": 900
 }
 ```
 
-- `[n]` in `answer` refers to `results[n-1]`.
-- `documents` holds the derived metadata for every meeting that appears in `results`.
-
-### How retrieval works (`app/retrieval/`)
-
-1. **Semantic:** ChromaDB cosine similarity (`vectorstore.py`).
-2. **Lexical:** BM25 over all chunks, kept in memory and rebuilt after ingestion (`bm25.py`).
-3. **Fusion:** weighted Reciprocal Rank Fusion (`hybrid.py`).
-4. **Rerank:** the LLM rates each candidate from 0 to 10, one call per passage, run concurrently (`rerank.py`).
-5. **Answer:** grounded generation with `[n]` citations (`app/answer/generate.py`).
-
-The topic/priority/source_type filters are pushed into Chroma; the person and date filters are applied to both retrievers.
+### Pipeline (`app/answer/chat.py`)
+1. **Input guardrails:** prompt-injection heuristics plus an LLM classifier. Injection is blocked, off-topic is declined, small talk gets a canned reply.
+2. **Condense:** a follow-up is rewritten into a standalone query using the conversation history.
+3. **Retrieve:** pre-filter → semantic + BM25 → weighted RRF → pointwise LLM rerank.
+4. **Generate:** the answer is streamed with `[n]` citations; excerpts are treated as untrusted data; the newest source wins on conflict (R6).
+5. **Validate:** misplaced citations are re-attached, invalid ones removed and uncited factual claims dropped (R5). PII is redacted.
+6. **Confidence:** computed from retrieval, rerank and citation coverage. Below `CONFIDENCE_THRESHOLD`, routing suggestions are added and a `low_confidence` gap is created.
+7. **Persist:** the message, routing, gap and a metrics row are stored.
 
 ---
 
@@ -280,18 +222,27 @@ The topic/priority/source_type filters are pushed into Chroma; the person and da
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/health` | Liveness: `{"status":"ok"}` |
-| GET | `/api/stats` | Document/chunk counts, active collection, LLM/embedding/reranker, data dir |
-| POST | `/api/ingest` | Run ingestion (body optional: `{"force": true}`) |
-| POST | `/api/query` | Natural-language query (see section 5) |
-| GET | `/api/documents` | All ingested documents with derived metadata. Query params: `topic_domain`, `priority`, `source_type`, `person` |
-| GET | `/api/documents/{doc_id}` | One document's metadata (404 if unknown) |
-
-```bash
-curl -s localhost:8000/api/stats | jq
-curl -s 'localhost:8000/api/documents?topic_domain=yield&person=lisa' | jq
-curl -s localhost:8000/api/documents/<doc_id> | jq
-```
+| GET | `/api/health`, `/api/stats` | Liveness; counts by type, providers, collection, threshold |
+| POST | `/api/ingest` | Run ingestion (`{"force": true}` optional) |
+| GET | `/api/documents` | Documents with derived metadata (`topic_domain`, `priority`, `source_type`, `person`) |
+| GET | `/api/documents/{id}`, `/content`, `/file` | Metadata; normalized content + chunks (viewer); original file download |
+| POST | `/api/chat/stream` | Streaming conversational answer (SSE) |
+| GET/PATCH/DELETE | `/api/conversations[/{id}]` | List, read (with messages), rename, delete conversations |
+| POST | `/api/query` | Single-shot answer |
+| GET | `/api/query/{id}` | Stored answer with current status, feedback and routing |
+| POST | `/api/query/{id}/correct` | `{correction, submitted_by}` → correction gap (keeps the original query + answer) |
+| POST | `/api/query/{id}/reject` | `{reason, submitted_by}` → rejected gap + routing suggestions |
+| POST | `/api/query/{id}/feedback` | `{rating: "up" \| "down" \| null}` |
+| POST | `/api/routing/{id}/send` | `{question, sent_by}` → marks the (edited) question sent (log only, no delivery) |
+| POST | `/api/routing/{id}/dismiss` | Dismiss a suggestion |
+| GET | `/api/gaps`, `/api/gaps/{id}` | Gaps and corrections (`?type=low_confidence\|rejected\|correction&status=…`) |
+| GET | `/api/review-queue` | `{counts, items}`, pending first |
+| PATCH | `/api/review-queue/{id}` | `{review_status: pending\|reviewed\|resolved, reviewer_note}` |
+| GET | `/api/metrics?window=24h\|7d\|30d` | Current vs previous window, timeseries, alerts |
+| GET | `/api/evals` | Datasets and runs |
+| POST | `/api/evals/run` | `{dataset: golden\|synthetic\|all}` → background run (202) |
+| GET | `/api/evals/{id}` | Run summary + per-case results |
+| POST | `/api/evals/synthesize` | `{n}` → LLM-generated synthetic set from ingested chunks |
 
 ---
 
@@ -299,30 +250,32 @@ curl -s localhost:8000/api/documents/<doc_id> | jq
 
 | Store | Location | Contents |
 |---|---|---|
-| SQLite | `storage/app.db` | `documents` (metadata + enrichment), `action_items`, `enrichment_cache` |
+| SQLite | `storage/app.db` | `documents`, `action_items`, `enrichment_cache`, `conversations`, `messages`, `routing_suggestions`, `gaps`, `metrics`, `eval_runs`, `eval_results` |
 | ChromaDB | `storage/chroma/` | Chunk vectors + chunk metadata, one collection per embedding model |
+| Eval sets | `eval/golden.jsonl`, `eval/synthetic.jsonl` | Questions with expected sources and keywords |
 
-Inspect SQLite:
-
-```bash
-sqlite3 storage/app.db "select source_file, topic_domain, priority, n_chunks from documents"
-```
-
-**Full reset:** stop the server, `rm -rf storage/app.db* storage/chroma`, then ingest again.
+To reset everything, stop the server, run `rm -rf storage/app.db* storage/chroma`, then ingest again.
 
 ---
 
-## 8. Tests
+## 8. Tests and evals
 
 ```bash
-uv run pytest                        # unit tests + end-to-end test against local Ollama
+uv run pytest                        # unit tests + end-to-end against local Ollama
 uv run pytest -m "not integration"   # fast unit tests only
-uv run pytest tests/test_chunking.py::test_small_section_kept_whole_with_metadata  # one test
-./scripts/smoke_ex1.sh               # curl smoke test against a running server
-uv run ruff check . && uv run ruff format .
+./scripts/smoke_ex1.sh               # Ex1 curl checks against a running server
+./scripts/smoke_ex2.sh               # Ex2: both sources, traceability, guardrails, routing, gaps, review, metrics
+uv run python -m app.evals --dataset golden            # exits 1 if below target
+uv run python -m app.evals --synthesize 20 --dataset synthetic
 ```
+The integration test uses `tests/fixtures/` plus small real Office files it generates (never `data/`). It needs Ollama with `qwen2.5:7b` and `nomic-embed-text` and is skipped automatically otherwise.
 
-The integration test uses `tests/fixtures/` (never `data/`) and needs Ollama with `qwen2.5:7b` and `nomic-embed-text`. It's skipped automatically if those aren't available.
+Eval metrics:
+- **Retrieval:** hit rate (an expected source was retrieved), MRR, cited-expected (the answer cites an expected source).
+- **Answerability accuracy:** confident on answerable questions, abstains or routes on unanswerable ones.
+- **Keyword recall.**
+- **LLM judge:** faithfulness and relevance.
+- **Citation validity.**
 
 ---
 
@@ -336,5 +289,6 @@ The integration test uses `tests/fixtures/` (never `data/`) and needs Ollama wit
 | Query returns no results | Run `POST /api/ingest`; check that `GET /api/stats` shows `chunks > 0` for the active collection |
 | Results empty after switching embedding model | Expected: the new model has its own collection, so re-ingest |
 | `409` on ingest | An ingestion run is already in progress |
-| Slow queries with Ollama | Local reranking takes ~15–20s; set `RERANKER=none` or use OpenAI |
+| Slow answers with Ollama | Local qwen2.5:7b runs guard + rewrite + rerank + generation sequentially (~20–60s). Set `RERANKER=none`, `GUARDRAILS_LLM=false`, or use OpenAI |
+| A `.pptx` shows `format: text-fallback` | The file isn't real PowerPoint (plain text with a .pptx name); it's still ingested and cited under its own name |
 | `files_found: 0` | Check that `DATA_DIR` points to the folder containing `meetings/` |

@@ -1,11 +1,12 @@
-"""Hybrid retrieval: semantic (Chroma) + BM25 -> weighted Reciprocal Rank Fusion -> rerank."""
+"""Hybrid retrieval: metadata pre-filter -> semantic (Chroma) + BM25 -> weighted Reciprocal
+Rank Fusion -> rerank."""
 
-from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from langchain_core.documents import Document
 
 from app.config import get_settings
+from app.db import repository
 from app.models.api import QueryFilters
 from app.retrieval.bm25 import get_bm25_index
 from app.retrieval.rerank import get_reranker
@@ -24,34 +25,49 @@ class RetrievalResult:
     reranker: str
 
 
-def chroma_where(filters: QueryFilters | None) -> dict | None:
-    if not filters:
-        return None
-    clauses = [{k: getattr(filters, k)} for k in _SCALAR_FILTERS if getattr(filters, k)]
-    if not clauses:
-        return None
-    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+@dataclass
+class FilterPlan:
+    """Pre-filter applied to both retrievers before ranking.
 
+    Scalar chunk metadata (topic, priority, source type) is filtered natively by Chroma.
+    Person and date filters are resolved to the matching doc ids in SQLite (source of truth
+    for attendees/dates) and pushed into Chroma as ``doc_id $in [...]``.
+    ``allowed_doc_ids`` is None when there is no doc-level filter; an empty set means no
+    document can match.
+    """
 
-def make_predicate(filters: QueryFilters | None) -> Callable[[Document], bool]:
-    def predicate(doc: Document) -> bool:
-        if not filters:
-            return True
+    where: dict | None = None
+    scalars: dict[str, str] = field(default_factory=dict)
+    allowed_doc_ids: set[str] | None = None
+
+    @property
+    def matches_nothing(self) -> bool:
+        return self.allowed_doc_ids is not None and not self.allowed_doc_ids
+
+    def predicate(self, doc: Document) -> bool:
         m = doc.metadata
-        for key in _SCALAR_FILTERS:
-            want = getattr(filters, key)
-            if want and m.get(key) != want:
-                return False
-        if filters.person and filters.person.lower() not in m.get("people", ""):
+        if any(m.get(k) != v for k, v in self.scalars.items()):
             return False
-        date = m.get("date") or ""
-        if filters.date_from and (not date or date < filters.date_from):
-            return False
-        if filters.date_to and (not date or date > filters.date_to):
-            return False
-        return True
+        return self.allowed_doc_ids is None or m.get("doc_id") in self.allowed_doc_ids
 
-    return predicate
+
+def plan_filters(filters: QueryFilters | None) -> FilterPlan:
+    if not filters:
+        return FilterPlan()
+    scalars = {k: getattr(filters, k) for k in _SCALAR_FILTERS if getattr(filters, k)}
+    clauses: list[dict] = [{k: v} for k, v in scalars.items()]
+
+    allowed: set[str] | None = None
+    if filters.person or filters.date_from or filters.date_to:
+        allowed = repository.find_doc_ids(
+            person=filters.person, date_from=filters.date_from, date_to=filters.date_to, **scalars
+        )
+        if not allowed:
+            return FilterPlan(scalars=scalars, allowed_doc_ids=set())
+        clauses.append({"doc_id": {"$in": sorted(allowed)}})
+
+    where = None if not clauses else clauses[0] if len(clauses) == 1 else {"$and": clauses}
+    return FilterPlan(where=where, scalars=scalars, allowed_doc_ids=allowed)
 
 
 def fuse(
@@ -81,17 +97,15 @@ def retrieve(
 ) -> RetrievalResult:
     s = get_settings()
     top_k = top_k or s.top_k
-    predicate = make_predicate(filters)
+    plan = plan_filters(filters)
+    reranker = get_reranker(rerank)
+    if plan.matches_nothing:
+        return RetrievalResult([], 0, 0, 0, reranker.name)
 
-    semantic = [
-        (d, sc)
-        for d, sc in semantic_search(query, s.candidate_k, chroma_where(filters))
-        if predicate(d)
-    ]
-    lexical = get_bm25_index().search(query, s.candidate_k, predicate)
+    semantic = semantic_search(query, s.candidate_k, plan.where)
+    lexical = get_bm25_index().search(query, s.candidate_k, plan.predicate)
     fused = fuse(semantic, lexical, s.semantic_weight, s.bm25_weight, s.rrf_k)[: s.candidate_k]
 
-    reranker = get_reranker(rerank)
     ranked = reranker.rerank(query, fused)
     return RetrievalResult(
         chunks=ranked[:top_k],

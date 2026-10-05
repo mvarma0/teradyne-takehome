@@ -4,10 +4,12 @@
 2. Merge consecutive sections smaller than CHUNK_MIN_TOKENS (avoids heading-only fragments).
 3. Recursively split only sections above CHUNK_MAX_TOKENS: paragraphs/speaker turns ->
    lines -> sentences -> clauses -> words. Size is an upper bound, not a fixed width.
+   Markdown tables (spreadsheets, docx tables) split by rows with the header repeated.
 Each chunk is prefixed with a context line (title, date, section path) to help both
 semantic and BM25 retrieval.
 """
 
+import re
 from functools import lru_cache
 
 import tiktoken
@@ -67,15 +69,64 @@ def _recursive_splitter() -> RecursiveCharacterTextSplitter:
     )
 
 
-def chunk_document(src: SourceDoc, enrichment: EnrichmentResult) -> list[Document]:
+_TABLE_ROW = re.compile(r"^\s*\|")
+
+
+def _blocks(text: str) -> list[tuple[bool, str]]:
+    """Split text into (is_table, block) runs of markdown-table vs other lines."""
+    blocks: list[tuple[bool, list[str]]] = []
+    for line in text.splitlines():
+        is_table = bool(_TABLE_ROW.match(line))
+        if blocks and blocks[-1][0] == is_table:
+            blocks[-1][1].append(line)
+        else:
+            blocks.append((is_table, [line]))
+    return [(t, "\n".join(lines).strip()) for t, lines in blocks if "\n".join(lines).strip()]
+
+
+def split_table(table: str, max_tokens: int) -> list[str]:
+    """Split a markdown table by rows, repeating the header row + separator in every piece."""
+    lines = table.splitlines()
+    header, rows = lines[:2], lines[2:]
+    pieces, current = [], list(header)
+    for row in rows:
+        if len(current) > 2 and count_tokens("\n".join([*current, row])) > max_tokens:
+            pieces.append("\n".join(current))
+            current = list(header)
+        current.append(row)
+    pieces.append("\n".join(current))
+    return pieces
+
+
+def split_oversized(text: str, max_tokens: int) -> list[str]:
+    """Recursive split for prose; row-wise split (header kept) for tables."""
     splitter = _recursive_splitter()
+    out: list[str] = []
+    for is_table, block in _blocks(text):
+        if count_tokens(block) <= max_tokens:
+            out.append(block)
+        elif is_table:
+            out += split_table(block, max_tokens)
+        else:
+            out += [t.strip() for t in splitter.split_text(block) if t.strip()]
+    # Re-merge neighbouring small blocks so prose + its table stay together when they fit.
+    merged: list[str] = []
+    for piece in out:
+        if merged and count_tokens(f"{merged[-1]}\n\n{piece}") <= max_tokens:
+            merged[-1] = f"{merged[-1]}\n\n{piece}"
+        else:
+            merged.append(piece)
+    return merged
+
+
+def chunk_document(src: SourceDoc, enrichment: EnrichmentResult) -> list[Document]:
     max_tokens = get_settings().chunk_max_tokens
     pieces: list[tuple[str, str]] = []
     for path, text in split_sections(src.content):
         if count_tokens(text) <= max_tokens:
             pieces.append((path, text))
         else:
-            pieces += [(path, t.strip()) for t in splitter.split_text(text) if t.strip()]
+            pieces += [(path, t) for t in split_oversized(text, max_tokens)]
 
     people = ", ".join(src.attendees or src.authors)
     docs = []

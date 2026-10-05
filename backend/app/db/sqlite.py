@@ -31,7 +31,17 @@ def connect() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+_ADDED_COLUMNS = {
+    "documents": {"extra_json": "TEXT NOT NULL DEFAULT '{}'", "content": "TEXT"},
+}
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA_PATH.read_text())
+        for table, columns in _ADDED_COLUMNS.items():
+            existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for name, ddl in columns.items():
+                if name not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")

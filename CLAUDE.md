@@ -16,7 +16,7 @@ The original brief is in `take-home-assignment.md`. **`TASKS.md` is the executio
 - **Every claim in an answer must cite a retrieved chunk.** Claims with invalid citations are dropped, not shown.
 - **Nothing constructs LLM or embedding clients directly.** Always use `app/llm/factory.py` (`get_llm()`, `get_embeddings()`). All tunables live in `app/config.py` (pydantic-settings, `.env`).
 - **No fake models.** Providers are `openai` or `ollama` only. Tests run against local Ollama (`qwen2.5:7b`, `nomic-embed-text`); the integration test is skipped if Ollama is unavailable. Test fixtures live in `backend/tests/fixtures/`, never in `data/`, and stay small.
-- Don't read `data/meetings` content unless the user asks.
+- Don't read `data/` content unless the user asks (only `data/documents/docx/yield_improvement_report_q1.docx` was read, to write `eval/golden.jsonl`).
 - Business rules live in one place, `app/answer/business_rules.py`, and are applied identically to all source types.
 
 ## Company context (FastChip Semiconductor, all fictional)
@@ -32,119 +32,103 @@ The original brief is in `take-home-assignment.md`. **`TASKS.md` is the executio
 | Product/Business | Rachel Adams (Product Manager), Mike O'Brien (Sales Director), Jennifer Liu (Quality Manager) |
 | Leadership | Robert Zhang (CEO), Amanda Foster (CTO), Kevin Nash (CFO) |
 
-This table is the routing people directory (`app/routing/people.py`).
+This is the brief's context. **The actual dataset differs**: it centres on the Volta-7 automotive EV powertrain controller, customer NovaDrive Motors, and people such as Mike Chen, Lisa Park, Sara Nolan, James Ortiz and Anna Becker. All prompts are product-agnostic, and routing uses the people parsed from the data, not this table.
 
 ## Dataset (in `data/`, read-only)
-- `data/meetings/`: 20 `.md` transcripts (attendees, date, free-form text with embedded decisions and action items)
-  - 1-4: Eagle-5 yield · 5-8: Falcon-7 design reviews · 9-11: supply chain/vendors · 12-14: customer escalations · 15-17: quality & compliance · 18-20: executive strategy
-- `data/documents/docx/` (5): Eagle-5 Yield Analysis Report, Falcon-7 Design Spec, Quarterly Quality Report, Vendor Evaluation Summary, Customer Escalation Procedures
-- `data/documents/pptx/` (5): Falcon-7 Program Review, Eagle-5 Yield Improvement Plan, Q3 Business Review, Supply Chain Risk Assessment, AEC-Q100 Qualification Status
-- `data/documents/xlsx/` (5): Eagle-5 Yield Data by Wafer Lot, Falcon-7 Timeline & Milestones, Vendor Scorecard Matrix, Customer Complaint Tracker, Test Coverage Matrix
-
-Office authors come from core properties (`author`/`creator`), with a fallback to an "Author:/Owner:" line in the body, else `"unknown"`.
+- `data/meetings/`: 20 plain-text `.md` transcripts. Header lines: `Meeting:`, `Date: … Time: … Location: …`, `Attendees: Name (Role), …`, `Meeting Type:`. Then plain section labels (`Discussion`, `Decisions`, `Action Items`) and `Name: text` speaker turns.
+- `data/documents/docx/` (5): corrective_action_8d, failure_analysis_htol, npi_checklist_volta7, pe_division_sop, yield_improvement_report_q1. Core properties are empty or generic; author, title, date and reviewers are in body lines like `**Author:** Name, Role`.
+- `data/documents/pptx/` (5 `.pptx` + 5 `_slides.md`): the `.pptx` files are **plain UTF-8 text, byte-identical to their `_slides.md`**, not real OOXML. They're ingested through the text fallback and flagged in the report. `_slides.md` files aren't ingested (only Office extensions are read from `documents/`).
+- `data/documents/xlsx/` (5): action_item_tracker, defect_pareto_log, reliability_test_matrix, test_time_breakdown, yield_tracker.
 
 ## Tech stack
 - Backend: Python 3.12, **uv**, FastAPI, LangChain (splitters, chains, structured output), **docling** (document parsing), **ChromaDB** (vectors), **rank-bm25** (lexical), **SQLite** (structured business data).
 - Models (per component, via `.env`): `openai` (`gpt-4o-mini`, `text-embedding-3-small`) or `ollama` (`qwen2.5:7b`, `nomic-embed-text`).
-- Frontend: React + Vite + TypeScript + Tailwind. The dev server proxies `/api` → `http://localhost:8000`.
+- Frontend: React 19 + Vite + TypeScript + Tailwind v4 (+ typography), react-router, react-markdown, recharts, lucide-react. The dev server proxies `/api` → `http://127.0.0.1:8000`.
 
 ## Commands
-Backend (run from `backend/`):
 ```bash
-uv sync                                   # install
-cp .env.example .env                      # then set OPENAI_API_KEY
-uv run uvicorn app.main:app --reload      # API on :8000
-uv run python -m app.ingestion            # ingest data/meetings (idempotent; --force, --dry-run = parse+chunk only)
-uv run pytest                             # unit + Ollama integration test
+./dev.sh                                  # backend :8000 + frontend :5173 together
+```
+Backend (from `backend/`):
+```bash
+uv sync && cp .env.example .env           # pick providers (+ OPENAI_API_KEY for openai)
+uv run uvicorn app.main:app --reload      # API on :8000, docs at /docs
+uv run python -m app.ingestion            # ingest data/ (idempotent; --force, --dry-run = parse+chunk only)
+uv run pytest                             # unit + Ollama end-to-end test
 uv run pytest -m "not integration"        # fast unit tests only
 uv run pytest tests/test_x.py::test_name  # single test
 uv run ruff check . && uv run ruff format .
-uv run python -m eval.run_eval            # golden-set quality eval (needs API key + ingested data)
-./scripts/smoke_ex1.sh / smoke_ex2.sh     # curl smoke tests against a running server
+uv run python -m app.evals --dataset golden   # offline eval (--synthesize N first to generate a synthetic set)
+./scripts/smoke_ex1.sh && ./scripts/smoke_ex2.sh   # curl smoke tests against a running server
 ```
-Frontend (run from `frontend/`):
-```bash
-npm install && npm run dev                # UI on :5173
-npm run build                             # type-check + build
-```
+Frontend (from `frontend/`): `npm install && npm run dev` (:5173), `npm run build` (type-check + build).
 
 ## Architecture
 ```
-data/meetings/*.md → loaders/meeting.py (deterministic title/date/attendees+roles/type/location)
-      → docling_md.py (promote plain section labels to ##, keep speaker turns, docling → markdown)
-      → enrich.py (LLM structured output, cached by content hash + model + prompt version)
-      → chunking.py (structure-aware recursive: headings → merge small → split oversized by
-        paragraph/turn → line → sentence; token budget is an upper bound)
-      → Chroma (scalar chunk metadata) + SQLite documents/action_items
-POST /api/query → hybrid.py: semantic (Chroma) + BM25 (in-memory, rebuilt after ingest)
-      → weighted RRF → rerank.py (pointwise LLM judge, concurrent) → top_k
-      → generate.py (answer with [n] citations) + derived document metadata
-Ex2 adds: citations.py, confidence.py, business_rules.py, routing, gaps, metrics.
+data/meetings/*.md      → loaders/meeting.py (deterministic title/date/attendees+roles/type/location)
+data/documents/**/*.ext → loaders/office.py  (docling per slide/sheet; authors/reviewers/title from core
+                                               props or body bylines; text fallback for non-OOXML)
+  → docling_md.py (meetings: promote section labels to ##, keep speaker turns)
+  → enrich.py (LLM structured output, cached by content hash + model + PROMPT_VERSION)
+  → business_rules.apply_ingest_rules (R1-R3)
+  → chunking.py (headings → merge small → recursive split of oversized; tables split by rows w/ header)
+  → Chroma (scalar chunk metadata) + SQLite documents/action_items (+ normalized content for the viewer)
+
+POST /api/chat/stream (SSE) | POST /api/query → answer/chat.py run_chat():
+  guardrails.classify_input (injection heuristics + LLM: knowledge|small_talk|off_topic|prompt_injection)
+  → condense follow-up with history → hybrid.retrieve (pre-filter → semantic + BM25 → RRF → pointwise
+    LLM rerank) → stream tokens through StreamRedactor (PII) → citations.build_claims (re-attach,
+    validate, drop uncited) → confidence.score_confidence → routing.suggest_routing if not confident
+  → persist message (+routing, low_confidence gap) → metrics.record → final event
+Feedback: feedback/actions.py (correct / reject→routing / thumbs) → gaps → review queue
+Evals: evals/runner.py over eval/golden.jsonl + eval/synthetic.jsonl (LLM-generated from chunks)
 ```
-- Pointwise reranking is deliberate: listwise prompts misaligned scores on qwen2.5:7b. The judge returns `{reason, relevance}`, since the reason field improves small-model scoring.
-- Re-ingest is idempotent: documents are keyed by source path + content_hash, and their old chunks are deleted before upsert. Files removed from `data/` are pruned. Bump `PROMPT_VERSION` in `enrich.py` when the enrichment prompt changes, and use `--force` to re-enrich.
-- The Chroma collection name gets the embedding model as a suffix, so switching models needs a re-ingest and never mixes vectors.
-- Chroma metadata must be scalar, so lists (attendees, authors, products) are stored as comma-joined strings. Canonical lists live in SQLite.
-- Confidence combines top/mean retrieval score, citation coverage and LLM self-rated answerability, thresholded by `CONFIDENCE_THRESHOLD`. A low-confidence result auto-creates a `low_confidence` gap and routing suggestions.
+- **Pointwise reranking is deliberate:** listwise prompts misaligned scores on qwen2.5:7b. The judge returns `{reason, relevance}`; the reason field improves small-model scoring.
+- **The answer streams raw tokens, but the `final` event carries the validated answer.** The UI replaces the streamed text with it.
+- **Every answered query is an assistant `messages` row:** message id = query id, used by `/api/query/{id}/…`.
+- **Re-ingest is idempotent** (source path + content_hash + collection); deleted files are pruned. Bump `PROMPT_VERSION` in `enrich.py` when the enrichment prompt changes, then ingest with `--force`.
+- **Chroma collections are per embedding model**, so switching models needs a re-ingest. Chroma metadata must be scalar, so lists are comma-joined there; canonical lists live in SQLite.
+- **`init_db()` adds new columns to existing databases** (`_ADDED_COLUMNS` in `db/sqlite.py`) when the schema grows.
 
 ## Configuration (`.env`, see `backend/.env.example`)
-`OPENAI_API_KEY, OLLAMA_BASE_URL, LLM_PROVIDER, LLM_MODEL, LLM_TEMPERATURE, EMBEDDING_PROVIDER, EMBEDDING_MODEL, USE_DOCLING, CHUNK_MAX_TOKENS, CHUNK_MIN_TOKENS, CHUNK_OVERLAP_TOKENS, ENRICH_MAX_CHARS, TOP_K, CANDIDATE_K, SEMANTIC_WEIGHT, BM25_WEIGHT, RRF_K, RERANKER (llm|none), RERANK_TOP_N, RERANK_CONCURRENCY, RERANK_MAX_CHARS, CONFIDENCE_THRESHOLD, MIN_RETRIEVAL_SCORE, DATA_DIR, CHROMA_DIR, CHROMA_COLLECTION, SQLITE_PATH, CORS_ORIGINS`. Relative paths resolve from `backend/`.
+Models, docling, chunk token budgets, retrieval/RRF/rerank, `CONFIDENCE_THRESHOLD`, `MIN_RETRIEVAL_SCORE`, `HISTORY_MESSAGES`, `GUARDRAILS_LLM`, `ROUTING_MAX_PEOPLE`, `ALERT_*` thresholds, storage paths, `CORS_ORIGINS`. Relative paths resolve from `backend/`. Restart the server after editing `.env`.
 
 ## Enrichment schema (`app/models/enrichment.py`)
-- `topic_domain`: `yield | design | test_engineering | npi_program | supply_chain | customer | quality_compliance | executive_strategy | other`
-- `priority`: `critical | high | medium | low | none`
-- `products`: list, normalized generically (`volta 7` → `Volta-7`)
-- `key_topics`: list[str]
-- `summary`: str
-- `decisions`: list[str]
-- `action_items`: list[{owner, task, due_date?}]
+`topic_domain` (yield | design | test_engineering | npi_program | supply_chain | customer | quality_compliance | executive_strategy | other), `priority` (critical | high | medium | low | none), `products`, `summary`, `key_topics`, `decisions`, `action_items[{owner, task, due_date}]`.
 
 ## SQLite tables (`app/db/schema.sql`)
-- `documents`: id, source_file, source_type, title, date, authors_json, attendees_json, attendees_source, content_hash, collection, topic_domain, priority, products_json, key_topics_json, summary, decisions_json, enrichment_json, extra_json (meeting_type, location, attendee_roles, meeting_number), n_chunks, ingested_at
-- `action_items`: id, document_id, owner, task, due_date
-- `enrichment_cache`: content_hash, model, enrichment_json
-- `queries`: id, query_text, filters_json, answer, claims_json, citations_json, confidence, status (answered|routed|rejected|corrected), latency_ms, created_at
-- `routing_suggestions`: id, query_id, person, role, reason, matched_sources_json, draft_question, edited_question, status (suggested|sent|dismissed), sent_at
-- `gaps`: id, query_id, type (low_confidence|rejected|correction), original_answer, correction_text, submitted_by, review_status (pending|reviewed|resolved), reviewer_note, created_at, reviewed_at
-- `metrics`: id, query_id, top_score, mean_score, n_citations, citation_valid_ratio, confidence, latency_ms, tokens_in, tokens_out, created_at
+`documents`, `action_items`, `enrichment_cache`, `conversations`, `messages` (assistant rows hold `payload_json` = the final answer payload, plus status and feedback), `routing_suggestions`, `gaps` (low_confidence | rejected | correction; review_status pending | reviewed | resolved), `metrics` (one row per answer), `eval_runs`, `eval_results`.
 
 ## API
 | Method | Path | Purpose |
 |---|---|---|
-| GET | /api/health | health |
-| GET | /api/stats | document/chunk counts, active collection and providers |
-| POST | /api/ingest | run the ingestion pipeline (`{"force": true}` to re-enrich) |
-| GET | /api/documents[/{id}] | docs with derived metadata (filters: topic_domain, priority, source_type, person) |
-| POST | /api/query | `{query, filters?, top_k?, rerank?, generate_answer?}` → answer, results, documents, retrieval stats (Ex2 adds claims, confidence, routing) |
-| GET | /api/query/{id} | fetch a logged query |
-| POST | /api/query/{id}/correct | capture a correction with the original query |
-| POST | /api/query/{id}/reject | reject → gap + routing |
-| POST | /api/routing/{id}/send | log the edited question as sent (no real delivery) |
-| GET | /api/gaps, /api/gaps/{id} | gaps & corrections (?type, ?status) |
-| GET/PATCH | /api/review-queue[/{id}] | team-lead queue; mark reviewed/resolved with a note |
-| GET | /api/metrics | rolling 24h/7d quality metrics + alert flags |
+| GET | /api/health, /api/stats | health; counts by type, providers, threshold |
+| POST | /api/ingest | ingest `data/` (`{"force": true}` to re-enrich) |
+| GET | /api/documents[/{id}], /{id}/content, /{id}/file | metadata (filters); content + chunks for the viewer; original file |
+| POST | /api/chat/stream | SSE: conversation, status, guardrail, sources, token*, final \| error |
+| GET/PATCH/DELETE | /api/conversations[/{id}] | chat history |
+| POST | /api/query | single-shot answer (same payload as `final`); `generate_answer:false` = retrieval only |
+| GET | /api/query/{id} | stored answer |
+| POST | /api/query/{id}/correct, /reject, /feedback | correction gap; rejection gap + routing; thumbs |
+| POST | /api/routing/{id}/send, /dismiss | log the (edited) question as sent; dismiss |
+| GET | /api/gaps[/{id}] | gaps & corrections (?type, ?status) |
+| GET/PATCH | /api/review-queue[/{id}] | counts + items; review with note |
+| GET | /api/metrics?window=24h\|7d\|30d | rollups vs previous window, timeseries, alerts |
+| GET/POST | /api/evals, /api/evals/run, /api/evals/{id}, /api/evals/synthesize | eval runs |
 
-Query response shape:
-```json
-{"query_id": "...", "answer": "...", "claims": [{"text": "...", "citations": [1]}],
- "citations": [{"n": 1, "source_file": "...", "source_type": "md|docx|pptx|xlsx", "location": "slide 3",
-                "authors": [], "attendees": [], "date": "...", "snippet": "...", "score": 0.82}],
- "results_metadata": [{"source_file": "...", "topic_domain": "...", "priority": "...", "products": []}],
- "confidence": 0.71, "confident": true,
- "routing": [{"routing_id": "...", "person": "...", "role": "...", "reason": "...", "matched_sources": [], "draft_question": "..."}]}
-```
+Answer payload: `query_id, conversation_id, query, standalone_query, answer, claims[{text,citations,kind,supported}], dropped_claims, citations[{n, chunk_id, doc_id, source_file, source_type, title, section, date, attendees, authors, people, people_label, topic_domain, priority, products, snippet, scores}], cited, documents[DocumentMetadata], confidence, confidence_detail, confident, status (answered|routed|refused|blocked|rejected|corrected), routing[], guardrails, retrieval, latency_ms, first_token_ms`.
 
 ## Folder layout
 ```
-backend/app/{config.py, main.py, state.py, llm/factory.py, db/, models/, ingestion/{loaders/,docling_md.py,enrich.py,chunking.py,pipeline.py}, retrieval/{vectorstore,bm25,hybrid,rerank}.py, answer/, api/routes.py}
-# Ex2 adds: routing/, feedback/, observability/
-backend/{eval/, scripts/, tests/}
-frontend/src/{api/, pages/, components/, types.ts}
-docs/MEASUREMENT.md
+backend/app/{config.py, main.py, state.py, llm/, db/, models/, ingestion/, retrieval/, answer/,
+             routing/, feedback/, observability/, evals/, api/}
+backend/{eval/golden.jsonl, scripts/, tests/}
+frontend/src/{api/client.ts, types.ts, lib/, components/{ui,meta,citations,chat,charts}.tsx, pages/}
+docs/MEASUREMENT.md, dev.sh
 ```
+Frontend charts use the validated palette tokens `--series-1..3` in `index.css`. Single-series charts use slot 1; never use dual axes.
 
 ## Open decisions (also see TASKS.md)
-- The real transcripts in `data/meetings` mention products and people (e.g. Volta-7) that differ from the company context above. Prompts are product-agnostic; reconcile this section once the dataset is final.
-- Legacy `.doc/.ppt/.xls` are handled by a LibreOffice `soffice --convert-to` shim if it's installed, otherwise skipped with a warning (the dataset has none).
-- No auth: `submitted_by` and the reviewer are free text.
-- The confidence threshold gets calibrated against `eval/golden.jsonl`.
+- The confidence threshold (0.55) is a heuristic. Calibrate it with the golden eval on the real data.
+- Legacy `.doc/.ppt/.xls` go through LibreOffice if it's installed; otherwise they fail with a clear error in the report.
+- No auth: `submitted_by`, the reviewer and `sent_by` are free text (the user name lives in localStorage).

@@ -7,8 +7,7 @@ import logging
 from app.config import get_settings
 from app.db.sqlite import init_db
 from app.ingestion.chunking import chunk_document, count_tokens
-from app.ingestion.loaders.meeting import iter_meeting_files, load_meeting
-from app.ingestion.pipeline import run_ingestion
+from app.ingestion.pipeline import discover_sources, run_ingestion
 from app.models.enrichment import EnrichmentResult
 
 
@@ -24,10 +23,12 @@ def dry_run() -> None:
         decisions=[],
         action_items=[],
     )
-    files = iter_meeting_files(s.meetings_dir)
-    print(f"{len(files)} meeting files in {s.meetings_dir}")
-    for path in files:
-        src = load_meeting(path, s.data_dir)
+    sources, warnings = discover_sources()
+    print(f"{len(sources)} source files under {s.data_dir}")
+    for w in warnings:
+        print(f"warning: {w}")
+    for path, loader in sources:
+        src = loader(path, s.data_dir)
         chunks = chunk_document(src, placeholder)
         sizes = [count_tokens(c.page_content) for c in chunks]
         print(
@@ -36,8 +37,11 @@ def dry_run() -> None:
                     "file": src.source_file,
                     "title": src.title,
                     "date": src.date,
+                    "type": src.source_type,
                     "attendees": src.attendees,
-                    "attendees_source": src.attendees_source,
+                    "authors": src.authors,
+                    "people_source": src.attendees_source,
+                    "format": src.extra.get("format", "markdown"),
                     "chunks": len(chunks),
                     "chunk_tokens": sizes,
                 }
@@ -46,7 +50,7 @@ def dry_run() -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Ingest data/meetings into SQLite + ChromaDB")
+    ap = argparse.ArgumentParser(description="Ingest data/ into SQLite + ChromaDB")
     ap.add_argument("--force", action="store_true", help="re-enrich and re-embed everything")
     ap.add_argument("--dry-run", action="store_true", help="parse and chunk only (no models)")
     args = ap.parse_args()
