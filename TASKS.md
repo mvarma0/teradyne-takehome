@@ -245,6 +245,52 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
 
 ---
 
+## Additional scope (requested 2026-10-06)
+
+- [x] **F1 README rewrite**
+  - Files: `README.md`
+  - Accept: clean, simple and informative, modelled on github.com/tanzeela-16/RAG_Chatbot_ComapnyDocs: one-line pitch, features table, architecture diagram + pipeline steps, quick start, tech stack, project structure, links to deeper docs
+  - Verify: following the quick start from a clean clone runs the app
+  - Status: Done: README follows the reference layout (features, architecture, quick start, pages, stack, structure, tests, docs).
+
+- [x] **F2 Traceability page**
+  - Files: `backend/app/api/routes_review.py` (or new route), `frontend/src/pages/TracePage.tsx`, `App.tsx`, `api/client.ts`, `types.ts`
+  - Accept: a new menu entry lists answered questions; each trace shows the question → guardrail verdict → rewritten query → retrieved chunks with scores (semantic, BM25, fused, rerank) and which were cited → claims kept/dropped → confidence → status/routing/gaps/feedback
+  - Verify: ask a question in Chat, open Trace, and see that query with its retrieved and cited documents
+  - Status: Done: `GET /api/traces[/{id}]`, Traceability page with a 7-step lineage, *Trace* link on each answer; verified in the browser and `tests/test_upload_and_traces.py`.
+
+- [x] **F3 Document upload**
+  - Files: `backend/app/api/routes.py`, `frontend/src/pages/DocumentsPage.tsx`, `api/client.ts`, `CLAUDE.md` (data/ rule updated: UI uploads may write to `data/`)
+  - Accept: the Documents page uploads a new or updated file (.md meeting, .docx/.pptx/.xlsx/.doc/.ppt/.xls); it is saved under `data/meetings/` or `data/documents/<ext>/` (same name = replace) and ingested; unsupported types and unsafe names are rejected
+  - Verify: upload a file → it appears in the list with derived metadata; re-upload it changed → re-ingested, not duplicated
+  - Status: Done: endpoint + Upload button; `tests/test_upload_and_traces.py` covers placement, replace, bad names/types. Real run: re-uploaded `meeting_2024_01_08_volta7_ramp_kickoff.md` unchanged → saved to `meetings/`, `replaced: true`, ingest 35 found / 0 ingested / 35 unchanged, file bytes and `data/` git status unchanged; `.exe` → 415.
+
+- [x] **F4 About page**
+  - Files: `frontend/src/pages/AboutPage.tsx`, `App.tsx`
+  - Accept: explains what the system is, what it does (ingest → retrieve → cited answer → route → review → monitor) and how to use each page
+  - Verify: `npm run build`; the page renders from the nav
+  - Status: Done: `/about`, in the nav; `npm run build` passes; checked in the browser.
+
+- [x] **F5 Chat layout does not jump when citations appear**
+  - Files: `frontend/src/pages/ChatPage.tsx` / `components/chat.tsx`
+  - Accept: the chat column keeps its position and width when the sources panel opens
+  - Verify: ask a question; the message column doesn't shift left when sources arrive
+  - Status: Done: the sources column is reserved from the start; Playwright measured the composer at the same x/width before, during and after an answer.
+
+- [x] **F6 Clean `.env`**
+  - Files: `backend/.env.example`, `backend/.env` (values kept), `backend/README.md`
+  - Accept: the top section holds only what must be chosen (provider, model, key); all tuning is optional, commented out and defaults to `app/config.py`
+  - Verify: `cp .env.example .env` + pick a preset → server starts; `uv run pytest -m "not integration"`
+  - Status: Done: `.env.example` rewritten (one required preset + commented optional tuning); local `backend/.env` replaced with it on preset B (Ollama), old file kept as `backend/.env.bak`; every setting resolves to the same value as before.
+
+- [x] **F7 DELIVERABLE.md**
+  - Files: `DELIVERABLE.md`
+  - Accept: every deliverable from the brief, how it is met and exactly where (files, endpoints, UI pages)
+  - Verify: each requirement in `take-home-assignment.md` maps to a row
+  - Status: Done: every requirement in the brief mapped to how it's met and where (files, endpoints, pages).
+
+---
+
 ## Backlog
 
 - [ ] **B1 Ingestion progress visibility**

@@ -11,7 +11,7 @@ A take-home assignment: a RAG knowledge system for the fictional **FastChip Semi
 The original brief is in `take-home-assignment.md`. **`TASKS.md` is the execution plan.** Work tasks in order. A task is done only after its Verify step passes. Then change `- [ ]` to `- [x]`.
 
 ## Hard rules
-- **Never create, modify or delete anything under `data/`.** It's the user-provided corpus and is read-only.
+- **Never create, modify or delete anything under `data/` from code or by hand.** It's the user-provided corpus. The only exception is the user-facing upload (`POST /api/documents/upload`, Documents page), which saves new or updated files there at the user's request (user-approved 2026-10-06).
 - **People fields (attendees, authors) come only from source parsing, never from the LLM.** The LLM derives topic, priority, products, summary, decisions and action items.
 - **Every claim in an answer must cite a retrieved chunk.** Claims with invalid citations are dropped, not shown.
 - **Nothing constructs LLM or embedding clients directly.** Always use `app/llm/factory.py` (`get_llm()`, `get_embeddings()`). All tunables live in `app/config.py` (pydantic-settings, `.env`).
@@ -105,10 +105,12 @@ Models, docling, chunk token budgets, retrieval/RRF/rerank, `CONFIDENCE_THRESHOL
 | GET | /api/health, /api/stats | health; counts by type, providers, threshold |
 | POST | /api/ingest | ingest `data/` (`{"force": true}` to re-enrich) |
 | GET | /api/documents[/{id}], /{id}/content, /{id}/file | metadata (filters); content + chunks for the viewer; original file |
+| POST | /api/documents/upload?filename= | raw body → saved into data/meetings or data/documents/<ext>/ (replace by name) → ingest changes |
 | POST | /api/chat/stream | SSE: conversation, status, guardrail, sources, token*, final \| error |
 | GET/PATCH/DELETE | /api/conversations[/{id}] | chat history |
 | POST | /api/query | single-shot answer (same payload as `final`); `generate_answer:false` = retrieval only |
 | GET | /api/query/{id} | stored answer |
+| GET | /api/traces[/{id}] | traceability: answered questions; full lineage of one answer (+gaps, routing) |
 | POST | /api/query/{id}/correct, /reject, /feedback | correction gap; rejection gap + routing; thumbs |
 | POST | /api/routing/{id}/send, /dismiss | log the (edited) question as sent; dismiss |
 | GET | /api/gaps[/{id}] | gaps & corrections (?type, ?status) |

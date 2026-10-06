@@ -145,3 +145,29 @@ def update_message(msg_id: str, **fields) -> None:
     sets = ", ".join(f"{k} = ?" for k in fields)
     with connect() as conn:
         conn.execute(f"UPDATE messages SET {sets} WHERE id = ?", [*fields.values(), msg_id])
+
+
+def list_traces(limit: int = 200) -> list[dict]:
+    """Assistant messages newest first, summarised for the traceability list."""
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT m.id, m.conversation_id, m.query_text, m.standalone_query, m.status,
+                   m.confidence, m.feedback, m.created_at, m.payload_json,
+                   (SELECT COUNT(*) FROM gaps g WHERE g.message_id = m.id) AS n_gaps
+               FROM messages m WHERE m.role = 'assistant' ORDER BY m.created_at DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    out = []
+    for r in rows:
+        payload = json.loads(r.pop("payload_json") or "{}")
+        cited = set(payload.get("cited") or [])
+        citations = payload.get("citations") or []
+        r["n_retrieved"] = len(citations)
+        r["n_cited"] = len(cited)
+        r["cited_files"] = list(
+            dict.fromkeys(c["source_file"] for c in citations if c.get("n") in cited)
+        )
+        r["guardrail"] = (payload.get("guardrails") or {}).get("category")
+        r["latency_ms"] = payload.get("latency_ms")
+        out.append(r)
+    return out

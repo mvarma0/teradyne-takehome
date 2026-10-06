@@ -18,6 +18,8 @@ cp .env.example .env         # then edit .env (see section 2)
 
 **All configuration goes in `backend/.env`.** You never edit code to switch models.
 
+`.env.example` has two parts. **1. Models** is the only required part: keep one preset (A OpenAI, B Ollama or C Gemini) uncommented and add its key. **2. Optional tuning** lists every other setting, commented out with its default; uncomment a line only to change it.
+
 `app/config.py` only declares which settings exist, their types and fallback defaults. Values resolve in this order, first match wins:
 
 1. Real environment variable (`LLM_PROVIDER=ollama uv run uvicorn ...`)
@@ -255,10 +257,12 @@ All filters are pre-filters, applied before ranking.
 | POST | `/api/ingest` | Run ingestion (`{"force": true}` optional) |
 | GET | `/api/documents` | Documents with derived metadata (`topic_domain`, `priority`, `source_type`, `person`) |
 | GET | `/api/documents/{id}`, `/content`, `/file` | Metadata; normalized content + chunks (viewer); original file download |
+| POST | `/api/documents/upload?filename=…` | Raw file body. Saves a new or updated `.md`/Office file into `data/meetings/` or `data/documents/<ext>/` (same name replaces it), then ingests changes |
 | POST | `/api/chat/stream` | Streaming conversational answer (SSE) |
 | GET/PATCH/DELETE | `/api/conversations[/{id}]` | List, read (with messages), rename, delete conversations |
 | POST | `/api/query` | Single-shot answer |
 | GET | `/api/query/{id}` | Stored answer with current status, feedback and routing |
+| GET | `/api/traces`, `/api/traces/{id}` | Traceability: every answered question with retrieved/cited sources; full lineage (guardrail, rewrite, retrieval scores, claims, confidence, routing, gaps, feedback) |
 | POST | `/api/query/{id}/correct` | `{correction, submitted_by}` → correction gap (keeps the original query + answer) |
 | POST | `/api/query/{id}/reject` | `{reason, submitted_by}` → rejected gap + routing suggestions |
 | POST | `/api/query/{id}/feedback` | `{rating: "up" \| "down" \| null}` |

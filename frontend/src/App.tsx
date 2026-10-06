@@ -1,4 +1,4 @@
-import { Activity, ClipboardCheck, FileStack, FlaskConical, MessagesSquare, Moon, Plus, Sun, Trash2, UserRound } from 'lucide-react'
+import { Activity, ClipboardCheck, FileStack, FlaskConical, GitBranch, Info, MessagesSquare, Moon, Plus, Sun, Trash2, UserRound } from 'lucide-react'
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { BrowserRouter, Link, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { api } from './api/client'
@@ -14,13 +14,17 @@ import ReviewPage from './pages/ReviewPage'
 
 const MonitoringPage = lazy(() => import('./pages/MonitoringPage'))
 const EvalsPage = lazy(() => import('./pages/EvalsPage'))
+const TracePage = lazy(() => import('./pages/TracePage'))
+const AboutPage = lazy(() => import('./pages/AboutPage'))
 
 const NAV = [
   { to: '/chat', label: 'Ask', icon: MessagesSquare },
   { to: '/documents', label: 'Documents', icon: FileStack },
+  { to: '/trace', label: 'Traceability', icon: GitBranch },
   { to: '/review', label: 'Review queue', icon: ClipboardCheck, badge: true },
   { to: '/monitoring', label: 'Monitoring', icon: Activity },
   { to: '/evals', label: 'Evals', icon: FlaskConical },
+  { to: '/about', label: 'About', icon: Info },
 ]
 
 function useTheme() {
@@ -61,7 +65,7 @@ function Shell({ children }: { children: ReactNode }) {
             <NavLink
               key={to}
               to={to}
-              end={to !== '/chat'}
+              end={to !== '/chat' && to !== '/trace'}
               title={label}
               className={({ isActive }) =>
                 cn(
@@ -196,6 +200,9 @@ export default function App() {
           <Route path="/review" element={<Page><ReviewPage /></Page>} />
           <Route path="/monitoring" element={<Page><MonitoringPage /></Page>} />
           <Route path="/evals" element={<Page><EvalsPage /></Page>} />
+          <Route path="/trace" element={<Page><TracePage /></Page>} />
+          <Route path="/trace/:queryId" element={<Page><TracePage /></Page>} />
+          <Route path="/about" element={<Page><AboutPage /></Page>} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </Shell>

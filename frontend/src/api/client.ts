@@ -12,6 +12,9 @@ import type {
   Routing,
   Stats,
   StoredMessage,
+  Trace,
+  TraceSummary,
+  UploadResult,
 } from '../types'
 
 export class ApiError extends Error {
@@ -55,6 +58,15 @@ export const api = {
     request<DocumentMeta[]>(`/documents${qs(filters)}`),
   documentContent: (id: string) => request<DocumentContent>(`/documents/${id}/content`),
   documentFileUrl: (id: string) => `/api/documents/${id}/file`,
+  uploadDocument: (file: File) =>
+    request<UploadResult>(`/documents/upload${qs({ filename: file.name })}`, {
+      method: 'POST',
+      body: file,
+      headers: { 'content-type': 'application/octet-stream' },
+    }),
+
+  traces: () => request<TraceSummary[]>('/traces'),
+  trace: (id: string) => request<Trace>(`/traces/${id}`),
 
   conversations: () => request<Conversation[]>('/conversations'),
   conversation: (id: string) =>

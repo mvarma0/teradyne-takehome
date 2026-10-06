@@ -1,5 +1,5 @@
-import { FileStack, RefreshCw, Search } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { FileStack, RefreshCw, Search, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { MetaBadges, SOURCE_LABEL, SourceIcon } from '../components/meta'
@@ -16,6 +16,8 @@ export default function DocumentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [ingesting, setIngesting] = useState(false)
   const [report, setReport] = useState<Record<string, unknown> | null>(null)
+  const [uploaded, setUploaded] = useState<{ file: string; replaced: boolean }[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
 
   const load = () => {
     api.documents().then(setDocs).catch((e) => setError(e.message))
@@ -33,6 +35,28 @@ export default function DocumentsPage() {
       setError((e as Error).message)
     } finally {
       setIngesting(false)
+    }
+  }
+
+  // Each file is saved into data/ (same name replaces it) and only changed files are re-ingested.
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return
+    setIngesting(true)
+    setError(null)
+    const done: { file: string; replaced: boolean }[] = []
+    try {
+      for (const f of Array.from(files)) {
+        const r = await api.uploadDocument(f)
+        done.push({ file: r.source_file, replaced: r.replaced })
+        setReport(r.report)
+      }
+      load()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setUploaded(done)
+      setIngesting(false)
+      if (fileInput.current) fileInput.current.value = ''
     }
   }
 
@@ -58,6 +82,22 @@ export default function DocumentsPage() {
         }
         actions={
           <>
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              accept=".md,.docx,.pptx,.xlsx,.doc,.ppt,.xls"
+              className="hidden"
+              onChange={(e) => upload(e.target.files)}
+            />
+            <Button
+              variant="primary"
+              onClick={() => fileInput.current?.click()}
+              disabled={ingesting}
+              title="Add a new meeting (.md) or Office file, or replace an existing one with the same name"
+            >
+              <Upload className="size-3.5" /> Upload
+            </Button>
             <Button onClick={() => ingest(false)} loading={ingesting}>
               <RefreshCw className="size-3.5" /> Ingest changes
             </Button>
@@ -68,6 +108,12 @@ export default function DocumentsPage() {
         }
       />
       <ErrorBanner error={error} />
+      {uploaded.length > 0 && (
+        <Card className="mb-2 p-3 text-sm">
+          <span className="font-medium">Uploaded:</span>{' '}
+          {uploaded.map((u) => `${u.file}${u.replaced ? ' (replaced the previous version)' : ''}`).join(', ')}
+        </Card>
+      )}
       {report && (
         <Card className="mb-4 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-3">
@@ -116,7 +162,7 @@ export default function DocumentsPage() {
       {!docs && !error && <Spinner />}
       {docs && filtered.length === 0 && (
         <EmptyState icon={<FileStack className="size-10" />} title={docs.length ? 'No matching documents' : 'Nothing ingested yet'}>
-          {!docs.length && 'Run an ingest to load data/meetings and data/documents.'}
+          {!docs.length && 'Upload files, or run an ingest to load data/meetings and data/documents.'}
         </EmptyState>
       )}
       {docs && filtered.length > 0 && (

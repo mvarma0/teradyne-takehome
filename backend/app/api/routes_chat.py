@@ -87,6 +87,29 @@ def get_query(query_id: str) -> dict:
     return {**payload, "status": msg["status"], "feedback": msg["feedback"]}
 
 
+@router.get("/traces")
+def list_traces(limit: int = 200) -> list[dict]:
+    """Every answered question, newest first, with what it retrieved and cited."""
+    return chat_repo.list_traces(limit)
+
+
+@router.get("/traces/{query_id}")
+def get_trace(query_id: str) -> dict:
+    """Full lineage of one answer: question -> guardrail -> rewrite -> retrieval -> claims ->
+    confidence -> status, routing, gaps and feedback."""
+    msg = chat_repo.get_message(query_id)
+    if not msg or msg["role"] != "assistant":
+        raise HTTPException(status_code=404, detail="query not found")
+    payload = msg.pop("payload") or {}
+    payload["routing"] = feedback_repo.routing_for_message(query_id) or payload.get("routing", [])
+    return {
+        **payload,
+        **msg,
+        "query": msg["query_text"],
+        "gaps": feedback_repo.gaps_for_message(query_id),
+    }
+
+
 def _not_found(exc: actions.NotFound) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
 

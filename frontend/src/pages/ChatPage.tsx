@@ -130,7 +130,7 @@ export default function ChatPage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto">
-        <div className={cn('mx-auto px-6 lg:px-10', empty ? 'max-w-2xl' : 'max-w-[1180px] py-10')}>
+        <div className={cn('mx-auto max-w-[1180px] px-6 lg:px-10', !empty && 'py-10')}>
           {loading && (
             <div className="flex justify-center py-10">
               <Spinner />
@@ -157,7 +157,8 @@ export default function ChatPage() {
           <div ref={bottomRef} className="h-4" />
         </div>
       </div>
-      <div className={cn('mx-auto w-full px-6 pb-5 lg:px-10', empty ? 'max-w-2xl' : 'max-w-[1180px] lg:pr-[calc(320px+3rem+2.5rem)]')}>
+      {/* Same width as the answer column in every state, so nothing shifts when a question is sent. */}
+      <div className="mx-auto w-full max-w-[1180px] px-6 pb-5 lg:px-10 lg:pr-[calc(320px+3rem+2.5rem)]">
         <Composer onSend={send} disabled={streaming} onStop={() => abortRef.current?.abort()} />
         <p className="mt-2 text-center text-[11px] text-slate-500">
           Every statement cites its source. Point at a number to see the source; click it to open the passage.
@@ -179,31 +180,38 @@ function Welcome({ counts, onPick }: { counts: Record<string, number> | null; on
   const parts = SOURCE_WORDS.filter(([k]) => counts?.[k]).map(([k, one, many]) => `${counts![k]} ${counts![k] === 1 ? one : many}`)
   const corpus = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]
   return (
-    <div className="pt-[14vh] pb-8">
-      <h1 className="text-[32px] leading-tight font-semibold tracking-tight text-slate-900 dark:text-white">
-        What do you need to know?
-      </h1>
-      <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-slate-600 dark:text-slate-400">
-        Answers come from {corpus ?? "FastChip's meetings and documents"}. Each statement names its source file and
-        the people behind it. If the sources don't settle a question, you'll get the right person to ask.
-      </p>
-      <div className="mt-8">
-        <h2 className="mb-2 text-xs font-medium text-slate-500">Try asking</h2>
-        <ul className="divide-y divide-slate-200/80 border-y border-slate-200/80 dark:divide-slate-800 dark:border-slate-800">
-          {SUGGESTIONS.map((s) => (
-            <li key={s.text}>
-              <button
-                onClick={() => onPick(s.text)}
-                className="group flex w-full items-center gap-3 py-2.5 text-left text-sm text-slate-700 transition-colors hover:text-brand-700 dark:text-slate-300 dark:hover:text-brand-200"
-              >
-                <span className="text-slate-400 group-hover:text-brand-600">{s.icon}</span>
-                <span className="flex-1">{s.text}</span>
-                <CornerDownLeft className="size-3.5 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100" />
-              </button>
-            </li>
-          ))}
-        </ul>
+    <div className="grid gap-x-12 pt-[14vh] pb-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="max-w-2xl">
+        <h1 className="text-[32px] leading-tight font-semibold tracking-tight text-slate-900 dark:text-white">
+          What do you need to know?
+        </h1>
+        <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-slate-600 dark:text-slate-400">
+          Answers come from {corpus ?? "FastChip's meetings and documents"}. Each statement names its source file and
+          the people behind it. If the sources don't settle a question, you'll get the right person to ask.
+        </p>
+        <div className="mt-8">
+          <h2 className="mb-2 text-xs font-medium text-slate-500">Try asking</h2>
+          <ul className="divide-y divide-slate-200/80 border-y border-slate-200/80 dark:divide-slate-800 dark:border-slate-800">
+            {SUGGESTIONS.map((s) => (
+              <li key={s.text}>
+                <button
+                  onClick={() => onPick(s.text)}
+                  className="group flex w-full items-center gap-3 py-2.5 text-left text-sm text-slate-700 transition-colors hover:text-brand-700 dark:text-slate-300 dark:hover:text-brand-200"
+                >
+                  <span className="text-slate-400 group-hover:text-brand-600">{s.icon}</span>
+                  <span className="flex-1">{s.text}</span>
+                  <CornerDownLeft className="size-3.5 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
+      <aside className="hidden self-start rounded-lg border border-dashed border-slate-300 p-4 text-xs leading-relaxed text-slate-500 lg:block dark:border-slate-700">
+        <p className="mb-1 font-medium text-slate-600 dark:text-slate-300">Sources appear here</p>
+        Each answer lists the passages it used, with the file, its author or attendees and the date. Numbers in the answer
+        point to these sources.
+      </aside>
     </div>
   )
 }

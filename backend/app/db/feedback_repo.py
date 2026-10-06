@@ -177,3 +177,10 @@ def gap_counts() -> dict:
         if r["review_status"] == "pending":
             counts["pending"] += r["n"]
     return counts
+
+
+def gaps_for_message(message_id: str) -> list[dict]:
+    with connect() as conn:
+        return conn.execute(
+            "SELECT * FROM gaps WHERE message_id = ? ORDER BY created_at", (message_id,)
+        ).fetchall()

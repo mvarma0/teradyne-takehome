@@ -4,6 +4,7 @@ import {
   Check,
   Copy,
   Filter,
+  GitBranch,
   Pencil,
   Search,
   Send,
@@ -15,6 +16,7 @@ import {
   X,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { fileName, getUserName, initials, label, ms } from '../lib/format'
 import type { AnswerPayload, Citation, DocumentMeta, QueryFilters, Routing } from '../types'
@@ -70,7 +72,8 @@ export function AssistantMessage({ msg, threshold, onOpenCitation, onPatch }: {
   const showRail = knowledge && citations.length > 0 && !blocked
 
   return (
-    <div className={cn('grid gap-x-12 gap-y-6', showRail && 'lg:grid-cols-[minmax(0,1fr)_320px]')}>
+    // The sources column is always reserved on wide screens so the answer never reflows when sources arrive.
+    <div className="grid gap-x-12 gap-y-6 lg:grid-cols-[minmax(0,1fr)_320px]">
       <div className="min-w-0 space-y-4">
         {msg.streaming && msg.stage && !text && (
           <div className="flex items-center gap-2 text-sm text-slate-500" role="status">
@@ -125,10 +128,19 @@ export function AssistantMessage({ msg, threshold, onOpenCitation, onPatch }: {
         )}
       </div>
 
-      {showRail && (
+      {showRail ? (
         <div className="lg:sticky lg:top-0 lg:max-h-[calc(100vh-12rem)] lg:self-start lg:overflow-y-auto lg:pr-1">
           <EvidenceRail citations={citations} cited={cited} active={active} onHover={setActive} onOpen={onOpenCitation} />
         </div>
+      ) : (
+        msg.streaming &&
+        !blocked && (
+          <div className="hidden space-y-2 self-start lg:block" aria-hidden>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-14 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-800/60" />
+            ))}
+          </div>
+        )
       )}
     </div>
   )
@@ -160,8 +172,13 @@ function AnswerMeta({ payload: p, threshold }: { payload: AnswerPayload; thresho
           </Badge>
         ))}
       </div>
-      <span className="ml-auto tabular-nums text-slate-400" title="Time to the validated answer">
-        {ms(p.latency_ms)}
+      <span className="ml-auto flex items-center gap-3">
+        <Link to={`/trace/${p.query_id}`} className="inline-flex items-center gap-1 text-slate-500 hover:text-brand-700 dark:hover:text-brand-200" title="See how this answer was built">
+          <GitBranch className="size-3.5" /> Trace
+        </Link>
+        <span className="tabular-nums text-slate-400" title="Time to the validated answer">
+          {ms(p.latency_ms)}
+        </span>
       </span>
     </div>
   )
