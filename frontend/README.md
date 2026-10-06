@@ -102,7 +102,7 @@ The Stop button aborts the request through an `AbortController`.
 
 ## Conventions
 - **Styling:** Tailwind utility classes only. Shared primitives live in `components/ui.tsx`. Dark mode is class-based (`.dark` on `<html>`; the `dark:` variant is defined in `index.css`).
-- **Types:** `src/types.ts` mirrors the backend response shapes. Update it together with the backend models (`backend/app/models/api.py`, `answer/chat.py` payload). The tsconfig uses `verbatimModuleSyntax`, so import types with `import type`.
+- **Types:** `src/types.ts` mirrors the backend response shapes. Update it together with the backend models (`backend/app/schemas.py`, `answer/chat.py` payload). The tsconfig uses `verbatimModuleSyntax`, so import types with `import type`.
 - **Charts:** recharts, coloured with the CSS tokens `--series-1..3`. These come from a validated colour-blind-safe palette with separate light and dark steps. Single-series charts use `--series-1`, multi-series charts get a legend plus direct labels, and dual y-axes are never used.
 - **Citations:** answer text is markdown; `[n]` markers are turned into `#cite-n` links and rendered as `CitationChip`s by the markdown `a` renderer.
 

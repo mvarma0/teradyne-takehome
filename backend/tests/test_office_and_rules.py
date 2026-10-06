@@ -4,11 +4,10 @@ from docx import Document as Docx
 from openpyxl import Workbook
 from pptx import Presentation
 
-from app.answer.business_rules import apply_ingest_rules
-from app.ingestion.chunking import count_tokens, split_table
-from app.ingestion.loaders.office import iter_document_files, load_office
-from app.models.enrichment import ActionItem, EnrichmentResult
-from app.models.source import SourceDoc
+from app.ingest import count_tokens, split_table
+from app.loaders import iter_document_files, load_office
+from app.rules import apply_ingest_rules
+from app.schemas import ActionItem, EnrichmentResult, SourceDoc
 
 
 def _mock_office_files(docs: Path) -> None:
@@ -108,3 +107,27 @@ def test_table_split_repeats_header():
     assert len(pieces) > 1
     assert all(p.startswith("| Lot | Yield |\n|---|---|") for p in pieces)
     assert all(count_tokens(p) <= 100 for p in pieces)
+
+
+def test_sheet_as_of_ignores_columns_that_only_contain_date_letters(tmp_path: Path):
+    from app.loaders import _sheet_as_of
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Date", "Status Update", "Validated By", "Due_Date"])
+    ws.append(["2026-03-02", "moved to week 12", "2026-12-31", "2026-11-30"])
+    path = tmp_path / "t.xlsx"
+    wb.save(path)
+    assert _sheet_as_of(path) == "2026-03-02"
+
+
+def test_sheet_as_of_accepts_date_header_variants(tmp_path: Path):
+    from app.loaders import _sheet_as_of
+
+    for header in ["Date:", "Dates", "Date(UTC)", "Log Date.", "Date_Raised", "closed_date"]:
+        wb = Workbook()
+        wb.active.append([header, "Status Update"])
+        wb.active.append(["2026-04-02", "2026-12-31"])
+        path = tmp_path / "h.xlsx"
+        wb.save(path)
+        assert _sheet_as_of(path) == "2026-04-02", header

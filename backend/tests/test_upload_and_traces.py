@@ -3,17 +3,16 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api import routes
-from app.db import chat_repo, feedback_repo
-from app.db.sqlite import init_db
-from app.ingestion.pipeline import IngestReport
+from app import api, db
+from app.db import init_db
+from app.ingest import IngestReport
 from app.main import app
 
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # Upload tests check file placement; ingestion itself is covered elsewhere.
-    monkeypatch.setattr(routes, "run_ingestion", lambda: IngestReport(collection="test"))
+    monkeypatch.setattr(api, "run_ingestion", lambda: IngestReport(collection="test"))
     init_db()
     return TestClient(app)
 
@@ -48,7 +47,7 @@ def test_upload_rejects_bad_names_and_types(client: TestClient, isolated_env: Pa
 
 
 def test_traces_list_and_detail(client: TestClient):
-    conv = chat_repo.create_conversation("q")
+    conv = db.create_conversation("q")
     payload = {
         "citations": [
             {"n": 1, "source_file": "meetings/a.md"},
@@ -58,10 +57,10 @@ def test_traces_list_and_detail(client: TestClient):
         "guardrails": {"category": "knowledge_question"},
         "latency_ms": 1200,
     }
-    chat_repo.add_assistant_message(
+    db.add_assistant_message(
         "m1", conv["id"], "answer", "What?", "What?", None, payload, 0.4, False, "routed"
     )
-    feedback_repo.create_gap("m1", "low_confidence", "What?", "answer", reason="low")
+    db.create_gap("m1", "low_confidence", "What?", "answer", reason="low")
 
     [row] = client.get("/api/traces").json()
     assert row["id"] == "m1"
@@ -74,3 +73,9 @@ def test_traces_list_and_detail(client: TestClient):
     assert detail["status"] == "routed"
     assert [g["type"] for g in detail["gaps"]] == ["low_confidence"]
     assert client.get("/api/traces/nope").status_code == 404
+
+
+def test_upload_lowercases_the_extension(client: TestClient, isolated_env: Path):
+    r = _upload(client, "Weekly_Sync.MD")
+    assert r.json()["source_file"] == "meetings/Weekly_Sync.md"
+    assert (isolated_env / "meetings/Weekly_Sync.md").exists()

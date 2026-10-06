@@ -1,12 +1,9 @@
 from langchain_core.documents import Document
 
-from app.db import repository
-from app.db.sqlite import init_db
-from app.models.api import QueryFilters
-from app.models.enrichment import EnrichmentResult
-from app.models.source import SourceDoc
-from app.retrieval.bm25 import BM25Index, tokenize
-from app.retrieval.hybrid import fuse, plan_filters, retrieve
+from app import db
+from app.db import init_db
+from app.schemas import EnrichmentResult, QueryFilters, SourceDoc
+from app.search import BM25Index, fuse, plan_filters, retrieve, tokenize
 
 
 def _doc(cid: str, text: str, **meta) -> Document:
@@ -54,7 +51,7 @@ def _store(doc_id: str, attendees: list[str], date: str, topic: str) -> None:
         decisions=[],
         action_items=[],
     )
-    repository.upsert_document(src, enr, "c", 1)
+    db.upsert_document(src, enr, "c", 1)
 
 
 def test_pre_filter_plan_resolves_person_and_date_to_doc_ids():

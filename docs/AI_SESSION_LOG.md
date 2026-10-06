@@ -42,6 +42,7 @@ This project was built with Claude Code as a pair programmer: I directed the wor
 - In `TASKS.md`, only update statuses and add notes; never rewrite tasks. (Claude once replaced sections wholesale; the file was restored from git and only statuses were changed.)
 - Don't read the dataset unless asked, and keep test fixtures minimal.
 - Run checks read-only and confirm before changing anything outside the code (configuration, data, memory).
+- **Added near the end (2026-10-06):** a `PostToolUse` hook in `.claude/settings.json` that runs `ruff format` and `ruff check --fix` on every backend Python file Claude edits, and returns any remaining lint errors to Claude. Also a project skill, `.claude/skills/verify/SKILL.md`, that packages the Verify steps from `TASKS.md` (lint, unit tests, integration test if Ollama is up, frontend build, plus the golden eval and smoke scripts on request). Earlier, these checks were run by hand.
 
 ## 6. Verification snapshot
 - **Backend:** unit tests plus an end-to-end test against local Ollama covering ingest, citations, chat streaming and follow-ups, guardrails, routing, reject/correct, the review queue and metrics. Smoke scripts `scripts/smoke_ex1.sh` and `scripts/smoke_ex2.sh` pass against a live server.

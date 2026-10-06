@@ -5,8 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.state import reset_all
+from app.main import app, reset_all
 from tests.conftest import requires_ollama
 from tests.test_office_and_rules import _mock_office_files
 

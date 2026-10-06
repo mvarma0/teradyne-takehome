@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Building2,
   ArrowUp,
   Check,
   Copy,
@@ -546,6 +547,7 @@ export function Composer({ onSend, disabled, onStop }: {
 }
 
 export const SUGGESTIONS = [
+  { icon: <Building2 className="size-4" />, text: 'What does FastChip do, and what are its main products?' },
   { icon: <Search className="size-4" />, text: 'What caused the low first-silicon yield on Volta-7?' },
   { icon: <UserRound className="size-4" />, text: 'Who owns the open action items from the design handoff meeting?' },
   { icon: <AlertTriangle className="size-4" />, text: 'What are the open customer escalations and their priority?' },

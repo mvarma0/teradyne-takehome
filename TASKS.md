@@ -2,6 +2,10 @@
 
 Status legend: `[x]` done (verified) · `[~]` in progress · `[ ]` to do.
 
+> Note (2026-10-06): the backend was later flattened into one module per concern (see `TECH.md` §1). File paths in tasks written before F9 refer to the original layout. Old → current: `app/llm/*` → `llm.py`; `app/db/*` → `db.py` + `schema.sql`; `app/models/*` → `schemas.py`; `app/ingestion/loaders/*`, `docling_md.py` → `loaders.py`; `app/ingestion/{pipeline,chunking,enrich}.py` → `ingest.py`; `app/retrieval/*` → `search.py`; `app/answer/{chat,citations,confidence}.py` → `answer.py`; `app/answer/guardrails.py` → `guardrails.py`; `app/answer/business_rules.py` → `rules.py`; `app/routing/*`, `app/feedback/*` → `feedback.py`; `app/observability/*` → `metrics.py`; `app/evals/*` → `evals.py`; `app/api/*` → `api.py`.
+>
+> Note (2026-10-06): the dataset was re-dated by 104 weeks (2024 → 2026, weekdays preserved) and now holds 24 meetings + 16 Office documents (40 files). Older status notes and examples that mention 2024 dates, "20 meetings + 15 documents" or 35 files predate this change.
+
 Execute in order. Each task lists **Input** (what must exist), **Files** (what it creates or modifies), **Accept** (acceptance criteria) and **Verify** (the command or check). Mark `[x]` only after Verify passes. Commands assume `backend/` or `frontend/` as cwd unless noted.
 
 ---
@@ -81,6 +85,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Verify: `POST /api/ingest` → `files_found` = 20, `failed` = []; check `warnings` for files without attendee lists; spot-check `GET /api/documents` topics/priorities; run `./scripts/smoke_ex1.sh`
   - Status: To do: waiting for the full real-data run (`data/` now has 20 meetings + 15 documents).
   - Status (T3 run, Gemini `gemini-3.1-flash-lite` + `gemini-embedding-001`): ingest of all 35 files done (0 failed, 173 chunks); `smoke_ex1.sh` updated for the current payload and passes on real data. **Pending:** re-ingest the 5 spreadsheets after their author properties were added, then mark done.
+  - Status (2026-10-06): the dataset now has 24 meetings + 16 documents (40 files) after the quality pass; the full real-data ingest still has to be re-run against it.
 
 ---
 
@@ -98,6 +103,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Accept: one section per slide (title, text, notes) with location `slide N`; author
   - Verify: pytest; dry-run lists 5 pptx
   - Status: Done: in `office.py`, one `## Slide N` section per slide plus speaker notes. The dataset's .pptx files are plain text, so they go through the text fallback and are flagged in the report.
+  - Status (2026-10-06): the dataset's .pptx files were later rebuilt as real OOXML decks, so they now go through the docling path; the text fallback remains for non-OOXML files.
 
 - [x] **2.3 XLSX loader**
   - Files: `app/ingestion/loaders/xlsx.py`, `tests/test_xlsx_loader.py`
@@ -263,7 +269,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Files: `backend/app/api/routes.py`, `frontend/src/pages/DocumentsPage.tsx`, `api/client.ts`, `CLAUDE.md` (data/ rule updated: UI uploads may write to `data/`)
   - Accept: the Documents page uploads a new or updated file (.md meeting, .docx/.pptx/.xlsx/.doc/.ppt/.xls); it is saved under `data/meetings/` or `data/documents/<ext>/` (same name = replace) and ingested; unsupported types and unsafe names are rejected
   - Verify: upload a file → it appears in the list with derived metadata; re-upload it changed → re-ingested, not duplicated
-  - Status: Done: endpoint + Upload button; `tests/test_upload_and_traces.py` covers placement, replace, bad names/types. Real run: re-uploaded `meeting_2024_01_08_volta7_ramp_kickoff.md` unchanged → saved to `meetings/`, `replaced: true`, ingest 35 found / 0 ingested / 35 unchanged, file bytes and `data/` git status unchanged; `.exe` → 415.
+  - Status: Done: endpoint + Upload button; `tests/test_upload_and_traces.py` covers placement, replace, bad names/types. Real run: re-uploaded `meeting_2024_01_08_volta7_ramp_kickoff.md` unchanged → saved to `meetings/`, `replaced: true`, ingest 35 found / 0 ingested / 35 unchanged, file bytes and `data/` git status unchanged; `.exe` → 415. (That run predates the re-dating; the file is now `meeting_2026_01_05_volta7_ramp_kickoff.md`.)
 
 - [x] **F4 About page**
   - Files: `frontend/src/pages/AboutPage.tsx`, `App.tsx`
@@ -288,6 +294,18 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Accept: every deliverable from the brief, how it is met and exactly where (files, endpoints, UI pages)
   - Verify: each requirement in `take-home-assignment.md` maps to a row
   - Status: Done: every requirement in the brief mapped to how it's met and where (files, endpoints, pages).
+
+- [x] **F8 Data quality pass**
+  - Files: `data/**` (user-approved), `backend/eval/golden.jsonl`, `backend/app/answer/guardrails.py`, `CLAUDE.md`
+  - Accept: sources agree with each other (HTOL lot, Rev B reliability timeline, CMP fix date, mask list); text defects fixed; supply-chain and executive-strategy meetings and a company overview added; timeline moved to 2026 with weekdays preserved; "What does FastChip do?" gets a cited answer and "what is this system?" gets the assistant introduction
+  - Verify: re-ingest reports 0 failures; `POST /api/query` "What does FastChip do?" cites `fastchip_company_overview.docx`; golden eval runs
+  - Status: Done: re-ingest 40/40 with 0 failures (Ollama and Gemini); "What does FastChip do?" answers from `fastchip_company_overview.docx` (confidence 0.95); golden eval runs.
+
+- [x] **F9 Flatten backend, fix dropped answers, honest faithfulness**
+  - Files: `backend/app/*.py` (45 files in 12 folders → 15 modules), `backend/tests/`, `TECH.md`, docs
+  - Accept: same API (29 paths) and tests; uncited but supported sentences are re-attached instead of dropped; questions about the assistant get the introduction; faithfulness judged per claim on full chunk text; runs on Gemini (`google_genai`)
+  - Verify: `uv run pytest -m "not integration"`; "What does FastChip do?" cites `fastchip_company_overview.docx`; golden eval faithfulness ≥ 0.7
+  - Status: Done: 15 modules, 41 unit tests, 29 API paths, smoke Ex1 9/9 and Ex2 12/12 on Gemini; golden eval faithfulness 1.0 (20/20 claims), hit rate 1.0, relevance 1.0. Answers that admit missing information are now capped at 0.45 so they route.
 
 ---
 
@@ -317,6 +335,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
     - Config `INFER_FILTERS=true|false` (default true) plus per-request `"infer_filters": false`
     - Response includes `retrieval.applied_filters` and `retrieval.filters_source` (`explicit|inferred|none`), so the UI can show and clear inferred filters
   - Verify: `uv run pytest tests/test_filter_extraction.py`; `curl -XPOST localhost:8000/api/query -d '{"query":"What did Lisa say in January 2024?"}'` shows `applied_filters.person` = "Lisa Park" and only her meetings in `results`; a question naming an unknown person returns unfiltered results with `filters_source: "none"`
+  - Note (2026-10-06): the dataset is now dated 2026, so use "January 2026" in the examples above.
 
 ---
 

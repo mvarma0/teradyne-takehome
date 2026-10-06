@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from app.state import reset_all
+from app.main import reset_all
 
 FIXTURES = Path(__file__).parent / "fixtures"
 OLLAMA_URL = "http://localhost:11434"

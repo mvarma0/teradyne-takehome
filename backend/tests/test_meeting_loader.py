@@ -1,5 +1,5 @@
 from app.config import get_settings
-from app.ingestion.loaders.meeting import iter_meeting_files, load_meeting, parse_meeting
+from app.loaders import iter_meeting_files, load_meeting, parse_meeting
 
 
 def test_frontmatter_format():
@@ -69,7 +69,7 @@ def test_plain_text_header_with_roles_and_inline_labels():
 
 
 def test_plain_section_labels_become_headings():
-    from app.ingestion.docling_md import promote_section_labels
+    from app.loaders import promote_section_labels
 
     assert promote_section_labels("Decisions\n1. x\nAction Items\n- y") == (
         "## Decisions\n1. x\n## Action Items\n- y"
@@ -77,7 +77,7 @@ def test_plain_section_labels_become_headings():
 
 
 def test_product_normalization():
-    from app.ingestion.enrich import normalize_product
+    from app.ingest import normalize_product
 
     assert [normalize_product(p) for p in ["volta 7", "VOLTA7", "Volta-7", "BCD node"]] == [
         "Volta-7",
@@ -88,8 +88,8 @@ def test_product_normalization():
 
 
 def test_revisions_and_sample_stages_are_not_products():
-    from app.ingestion.enrich import _normalize
-    from app.models.enrichment import EnrichmentResult
+    from app.ingest import _normalize
+    from app.schemas import EnrichmentResult
 
     result = EnrichmentResult(
         topic_domain="yield",

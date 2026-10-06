@@ -14,10 +14,10 @@ The original brief is in `take-home-assignment.md`. **`TASKS.md` is the executio
 - **Never create, modify or delete anything under `data/` from code or by hand.** It's the user-provided corpus. The only exception is the user-facing upload (`POST /api/documents/upload`, Documents page), which saves new or updated files there at the user's request (user-approved 2026-10-06).
 - **People fields (attendees, authors) come only from source parsing, never from the LLM.** The LLM derives topic, priority, products, summary, decisions and action items.
 - **Every claim in an answer must cite a retrieved chunk.** Claims with invalid citations are dropped, not shown.
-- **Nothing constructs LLM or embedding clients directly.** Always use `app/llm/factory.py` (`get_llm()`, `get_embeddings()`). All tunables live in `app/config.py` (pydantic-settings, `.env`).
+- **Nothing constructs LLM or embedding clients directly.** Always use `app/llm.py` (`get_llm()`, `get_embeddings()`). All tunables live in `app/config.py` (pydantic-settings, `.env`).
 - **No fake models.** Providers are real LangChain providers chosen in `.env` (`openai`, `google_genai`, `ollama` installed; others via `uv add langchain-<provider>`), built only through `init_chat_model`/`init_embeddings` in the factory. Tests run against local Ollama (`qwen2.5:7b`, `nomic-embed-text`); the integration test is skipped if Ollama is unavailable. Test fixtures live in `backend/tests/fixtures/`, never in `data/`, and stay small.
 - Don't read `data/` content unless the user asks (`data/documents/docx/yield_improvement_report_q1.docx` was read to write `eval/golden.jsonl`; during the real-data run, Office properties and sheet headers were inspected to debug missing authors/dates).
-- Business rules live in one place, `app/answer/business_rules.py`, and are applied identically to all source types.
+- Business rules live in one place, `app/rules.py`, and are applied identically to all source types.
 
 ## Company context (FastChip Semiconductor, all fictional)
 - About 500 employees. HQ in Austin, TX; design center in Portland, OR; test facility in Penang, Malaysia.
@@ -32,13 +32,15 @@ The original brief is in `take-home-assignment.md`. **`TASKS.md` is the executio
 | Product/Business | Rachel Adams (Product Manager), Mike O'Brien (Sales Director), Jennifer Liu (Quality Manager) |
 | Leadership | Robert Zhang (CEO), Amanda Foster (CTO), Kevin Nash (CFO) |
 
-This is the brief's context. **The actual dataset differs**: it centres on the Volta-7 automotive EV powertrain controller, customer NovaDrive Motors, and people such as Mike Chen, Lisa Park, Sara Nolan, James Ortiz and Anna Becker. All prompts are product-agnostic, and routing uses the people parsed from the data, not this table.
+This is the brief's context. **The actual dataset differs**: it centres on the Volta-7 automotive EV powertrain controller, customer NovaDrive Motors, and people such as Mike Chen, Lisa Park, Sara Nolan, James Ortiz and Anna Becker. `fastchip_company_overview.docx` ties it to the brief: Eagle-5, Falcon-7 and the PowerLine PMICs are the other product lines, and leadership is Robert Zhang (CEO), Amanda Foster (CTO) and Kevin Nash (CFO). All prompts are product-agnostic, and routing uses the people parsed from the data, not this table.
 
 ## Dataset (in `data/`, read-only)
-- `data/meetings/`: 20 plain-text `.md` transcripts. Header lines: `Meeting:`, `Date: … Time: … Location: …`, `Attendees: Name (Role), …`, `Meeting Type:`. Then plain section labels (`Discussion`, `Decisions`, `Action Items`) and `Name: text` speaker turns.
-- `data/documents/docx/` (5): corrective_action_8d, failure_analysis_htol, npi_checklist_volta7, pe_division_sop, yield_improvement_report_q1. Real OOXML; the author is in core properties, and body lines like `**Author:** Name, Role` / reviewers are also parsed. `npi_checklist_volta7.docx` carries python-docx's template timestamp, which the loader ignores (it is undated).
-- `data/documents/pptx/` (5): real OOXML decks (the earlier plain-text `.pptx` and `_slides.md` copies were rebuilt/removed); author from core properties, one section per slide plus speaker notes. The loader's text fallback still handles non-OOXML files with an Office extension.
-- `data/documents/xlsx/` (5): action_item_tracker, defect_pareto_log, reliability_test_matrix, test_time_breakdown, yield_tracker. They had no core properties; author, title and date were added (user-approved data change, sheet contents unchanged). If a sheet has no date property, the loader uses the latest row date.
+The story runs **January → September 2026**: Volta-7 first silicon at 41.2% yield (Metal 3 CMP dishing) → CMP fix → Rev A 500-hour HTOL failure (undersized ESD clamp, units U162/U189/U215 from qual lot LOT-V7-005) → Rev B metal spin (4 masks) → 78.4% yield → NovaDrive audit and interim PSW (May 11) → 1000-hour HTOL pass and full qualification (June 2) → production → FY2027 strategy (Sept 15).
+- `data/meetings/`: 24 plain-text `.md` transcripts named `meeting_YYYY_MM_DD_topic.md`. Header lines: `Meeting:`, `Date: … Time: … Location: …`, `Attendees: Name (Role), …`, `Meeting Type:`. Then plain section labels (`Discussion`, `Decisions`, `Action Items`) and `Name: text` speaker turns. Types cover NPI, yield, test, reliability, quality, customer escalation, supply chain and executive strategy.
+- `data/documents/docx/` (6): corrective_action_8d, failure_analysis_htol, fastchip_company_overview, npi_checklist_volta7, pe_division_sop, yield_improvement_report_q1. Real OOXML; the author is in core properties, and body lines like `**Author:** Name, Role` / reviewers are also parsed.
+- `data/documents/pptx/` (5): real OOXML decks; author from core properties, one section per slide plus speaker notes. The loader's text fallback still handles non-OOXML files with an Office extension.
+- `data/documents/xlsx/` (5): action_item_tracker (all meeting actions with status), defect_pareto_log, reliability_test_matrix, test_time_breakdown, yield_tracker. Author, title and date are in core properties. If a sheet has no date property, the loader uses the latest row date.
+- Data changes (all user-approved): spreadsheet properties added; 2026-10-06 quality pass that fixed cross-source contradictions and text defects, added 4 meetings (supply chain ×2, final HTOL readout, executive strategy) and the company overview, and shifted every date by 104 weeks (weekdays preserved). `backend/eval/golden.jsonl` was updated to match.
 
 ## Tech stack
 - Backend: Python 3.12, **uv**, FastAPI, LangChain (splitters, chains, structured output), **docling** (document parsing), **ChromaDB** (vectors), **rank-bm25** (lexical), **SQLite** (structured business data).
@@ -53,7 +55,7 @@ Backend (from `backend/`):
 ```bash
 uv sync && cp .env.example .env           # pick providers (+ OPENAI_API_KEY for openai)
 uv run uvicorn app.main:app --reload      # API on :8000, docs at /docs
-uv run python -m app.ingestion            # ingest data/ (idempotent; --force, --dry-run = parse+chunk only)
+uv run python -m app.ingest            # ingest data/ (idempotent; --force, --dry-run = parse+chunk only)
 uv run pytest                             # unit + Ollama end-to-end test
 uv run pytest -m "not integration"        # fast unit tests only
 uv run pytest tests/test_x.py::test_name  # single test
@@ -65,23 +67,23 @@ Frontend (from `frontend/`): `npm install && npm run dev` (:5173), `npm run buil
 
 ## Architecture
 ```
-data/meetings/*.md      → loaders/meeting.py (deterministic title/date/attendees+roles/type/location)
-data/documents/**/*.ext → loaders/office.py  (docling per slide/sheet; authors/reviewers/title from core
-                                               props or body bylines; text fallback for non-OOXML)
-  → docling_md.py (meetings: promote section labels to ##, keep speaker turns)
-  → enrich.py (LLM structured output, cached by content hash + model + PROMPT_VERSION)
-  → business_rules.apply_ingest_rules (R1-R3)
-  → chunking.py (headings → merge small → recursive split of oversized; tables split by rows w/ header)
+data/meetings/*.md      → loaders.py load_meeting (deterministic title/date/attendees+roles/type/location;
+                                    section labels promoted to ##, speaker turns kept)
+data/documents/**/*.ext → loaders.py load_office  (docling per slide/sheet; authors/reviewers/title from
+                                    core props or body bylines; text fallback for non-OOXML)
+  → ingest.py enrich (LLM structured output, cached by content hash + model + PROMPT_VERSION)
+  → rules.py apply_ingest_rules (R1-R3)
+  → ingest.py chunk_document (headings → merge small → recursive split of oversized; tables by rows)
   → Chroma (scalar chunk metadata) + SQLite documents/action_items (+ normalized content for the viewer)
 
-POST /api/chat/stream (SSE) | POST /api/query → answer/chat.py run_chat():
-  guardrails.classify_input (injection heuristics + LLM: knowledge|small_talk|off_topic|prompt_injection)
-  → condense follow-up with history → hybrid.retrieve (pre-filter → semantic + BM25 → RRF → pointwise
-    LLM rerank) → stream tokens through StreamRedactor (PII) → citations.build_claims (re-attach,
-    validate, drop uncited) → confidence.score_confidence → routing.suggest_routing if not confident
+POST /api/chat/stream (SSE) | POST /api/query → answer.py run_chat():
+  guardrails.classify_input (injection + assistant-question rules, then LLM: knowledge|small_talk|
+  off_topic|prompt_injection) → condense follow-up with history → search.retrieve (pre-filter →
+  semantic + BM25 → RRF → pointwise LLM rerank) → stream tokens through StreamRedactor (PII) →
+  answer.build_claims (re-place markers, re-attach uncited claims to the excerpt that contains them,
+  drop the rest) → answer.score_confidence → feedback.suggest_routing if not confident
   → persist message (+routing, low_confidence gap) → metrics.record → final event
-Feedback: feedback/actions.py (correct / reject→routing / thumbs) → gaps → review queue
-Evals: evals/runner.py over eval/golden.jsonl + eval/synthetic.jsonl (LLM-generated from chunks)
+Feedback: feedback.py (correct / reject→routing / thumbs) → gaps → review queue
 ```
 - **Pointwise reranking is deliberate:** listwise prompts misaligned scores on qwen2.5:7b. The judge returns `{reason, relevance}`; the reason field improves small-model scoring.
 - **The answer streams raw tokens, but the `final` event carries the validated answer.** The UI replaces the streamed text with it.
@@ -93,10 +95,10 @@ Evals: evals/runner.py over eval/golden.jsonl + eval/synthetic.jsonl (LLM-genera
 ## Configuration (`.env`, see `backend/.env.example`)
 Models, docling, chunk token budgets, retrieval/RRF/rerank, `CONFIDENCE_THRESHOLD`, `MIN_RETRIEVAL_SCORE`, `HISTORY_MESSAGES`, `GUARDRAILS_LLM`, `ROUTING_MAX_PEOPLE`, `ALERT_*` thresholds, storage paths, `CORS_ORIGINS`. Relative paths resolve from `backend/`. Restart the server after editing `.env`.
 
-## Enrichment schema (`app/models/enrichment.py`)
+## Enrichment schema (`app/schemas.py`)
 `topic_domain` (yield | design | test_engineering | npi_program | supply_chain | customer | quality_compliance | executive_strategy | other), `priority` (critical | high | medium | low | none), `products`, `summary`, `key_topics`, `decisions`, `action_items[{owner, task, due_date}]`.
 
-## SQLite tables (`app/db/schema.sql`)
+## SQLite tables (`app/schema.sql`)
 `documents`, `action_items`, `enrichment_cache`, `conversations`, `messages` (assistant rows hold `payload_json` = the final answer payload, plus status and feedback), `routing_suggestions`, `gaps` (low_confidence | rejected | correction; review_status pending | reviewed | resolved), `metrics` (one row per answer), `eval_runs`, `eval_results`.
 
 ## API
@@ -122,8 +124,8 @@ Answer payload: `query_id, conversation_id, query, standalone_query, answer, cla
 
 ## Folder layout
 ```
-backend/app/{config.py, main.py, state.py, llm/, db/, models/, ingestion/, retrieval/, answer/,
-             routing/, feedback/, observability/, evals/, api/}
+backend/app/{main, config, llm, schemas, db (+schema.sql), loaders, ingest, rules, search, guardrails,
+             answer, feedback, metrics, evals, api}.py   # flat: one module per concern, see TECH.md
 backend/{eval/golden.jsonl, scripts/, tests/}
 frontend/src/{api/client.ts, types.ts, lib/, components/{ui,meta,citations,chat,charts}.tsx, pages/}
 docs/MEASUREMENT.md, dev.sh

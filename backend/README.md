@@ -26,7 +26,7 @@ cp .env.example .env         # then edit .env (see section 2)
 2. `backend/.env`
 3. Default in `app/config.py`
 
-The **LLM** and the **embedding model** are chosen independently. A provider is any [LangChain provider id](https://python.langchain.com/docs/integrations/chat/); clients are built with `init_chat_model` / `init_embeddings` in `app/llm/factory.py`, so switching provider never needs a code change. `openai`, `google_genai` and `ollama` are installed; the options below are presets.
+The **LLM** and the **embedding model** are chosen independently. A provider is any [LangChain provider id](https://python.langchain.com/docs/integrations/chat/); clients are built with `init_chat_model` / `init_embeddings` in `app/llm.py`, so switching provider never needs a code change. `openai`, `google_genai` and `ollama` are installed; the options below are presets.
 
 ### Option A: OpenAI
 
@@ -166,7 +166,7 @@ Sources: `data/meetings/*.md` and `data/documents/**/*.{docx,pptx,xlsx,doc,ppt,x
 ```bash
 curl -X POST localhost:8000/api/ingest                                   # new / changed files
 curl -X POST localhost:8000/api/ingest -H 'content-type: application/json' -d '{"force": true}'
-uv run python -m app.ingestion [--force] [--dry-run]                     # CLI; dry-run = parse + chunk, no models
+uv run python -m app.ingest [--force] [--dry-run]                     # CLI; dry-run = parse + chunk, no models
 ```
 You can also click **Ingest** on the app's Documents page.
 
@@ -174,12 +174,12 @@ The report includes `files_found`, `ingested`, `skipped_unchanged`, `removed`, `
 
 | Step | Code |
 |---|---|
-| Meetings: title, date, attendees + roles, meeting type, location (deterministic, no LLM) | `app/ingestion/loaders/meeting.py` |
-| Office: docling content per slide (`## Slide N` + speaker notes) / sheet (`## Sheet: name`); author, reviewers, title and date from core properties or body bylines (`**Author:** Name, Role`); non-OOXML → text fallback; legacy formats via LibreOffice | `app/ingestion/loaders/office.py` |
-| LLM enrichment (topic, priority, products, summary, key topics, decisions, action items), cached | `app/ingestion/enrich.py` |
-| Business rules R1-R3 (priority floor, owners and products must appear in the source) | `app/answer/business_rules.py` |
-| Structure-aware recursive chunking; tables split by rows with the header repeated | `app/ingestion/chunking.py` |
-| Embed + store in Chroma; metadata + content in SQLite | `app/retrieval/vectorstore.py`, `app/db/repository.py` |
+| Meetings: title, date, attendees + roles, meeting type, location (deterministic, no LLM) | `app/loaders.py` |
+| Office: docling content per slide (`## Slide N` + speaker notes) / sheet (`## Sheet: name`); author, reviewers, title and date from core properties or body bylines (`**Author:** Name, Role`); non-OOXML → text fallback; legacy formats via LibreOffice | `app/loaders.py` |
+| LLM enrichment (topic, priority, products, summary, key topics, decisions, action items), cached | `app/ingest.py` |
+| Business rules R1-R3 (priority floor, owners and products must appear in the source) | `app/rules.py` |
+| Structure-aware recursive chunking; tables split by rows with the header repeated | `app/ingest.py` |
+| Embed + store in Chroma; metadata + content in SQLite | `app/search.py`, `app/db.py` |
 
 Ingestion is idempotent per content hash and active collection, and deleted files are pruned.
 
@@ -225,7 +225,7 @@ All filters are pre-filters, applied before ranking.
   "claims": [{"text": "…", "citations": [1], "kind": "fact", "supported": true}],
   "dropped_claims": ["uncited statement removed by rule R5"],
   "citations": [{"n": 1, "chunk_id": "…", "doc_id": "…", "source_file": "documents/docx/….docx",
-                 "source_type": "docx", "title": "…", "section": "…", "date": "2024-03-31",
+                 "source_type": "docx", "title": "…", "section": "…", "date": "2026-03-29",
                  "people": ["James Ortiz"], "people_label": "Author", "attendees": [], "authors": ["James Ortiz"],
                  "topic_domain": "yield", "priority": "high", "products": ["Volta-7"],
                  "snippet": "…", "scores": {"semantic": 0.71, "bm25": 4.2, "fused": 0.03, "rerank": 9}}],
@@ -238,7 +238,7 @@ All filters are pre-filters, applied before ranking.
 }
 ```
 
-### Pipeline (`app/answer/chat.py`)
+### Pipeline (`app/answer.py`)
 1. **Input guardrails:** prompt-injection heuristics plus an LLM classifier. Injection is blocked, off-topic is declined, small talk gets a canned reply.
 2. **Condense:** a follow-up is rewritten into a standalone query using the conversation history.
 3. **Retrieve:** pre-filter → semantic + BM25 → weighted RRF → pointwise LLM rerank.
@@ -323,5 +323,5 @@ Eval metrics:
 | Results empty after switching embedding model | Expected: the new model has its own collection, so re-ingest |
 | `409` on ingest | An ingestion run is already in progress |
 | Slow answers with Ollama | Local qwen2.5:7b runs guard + rewrite + rerank + generation sequentially (~20–60s). Set `RERANKER=none`, `GUARDRAILS_LLM=false`, or use OpenAI |
-| A `.pptx` shows `format: text-fallback` | The file isn't real PowerPoint (plain text with a .pptx name); it's still ingested and cited under its own name |
+| A file shows `format: text-fallback` | It has an Office extension but isn't real OOXML (e.g. plain text named `.pptx`). It's still ingested as text and cited under its own name; re-save it from Office to get slide- or sheet-level sections |
 | `files_found: 0` | Check that `DATA_DIR` points to the folder containing `meetings/` |

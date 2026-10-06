@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     app_env: Literal["dev", "test", "prod"] = "dev"
 
     # Models. A provider is any LangChain provider id (openai, google_genai, ollama,
-    # anthropic, groq, mistralai, azure_openai, ...); see app/llm/factory.py.
+    # anthropic, groq, mistralai, azure_openai, ...); see app/llm.py.
     # LLM: enrichment, answer generation, reranking
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o-mini"  # google_genai e.g. gemini-flash-lite-latest; ollama qwen2.5:7b

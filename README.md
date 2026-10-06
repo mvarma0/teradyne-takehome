@@ -37,12 +37,12 @@
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                    React frontend (Vite + Tailwind)                   │
-│  Ask · Documents · Traceability · Review queue · Monitoring · Evals    │
+│                    React frontend (Vite + Tailwind)                  │
+│  Ask · Documents · Traceability · Review queue · Monitoring · Evals  │
 └───────────────────────────────┬──────────────────────────────────────┘
                                 │ REST + Server-Sent Events (/api)
 ┌───────────────────────────────▼──────────────────────────────────────┐
-│                           FastAPI backend                             │
+│                           FastAPI backend                            │
 │  ┌────────────┐  ┌────────────┐  ┌─────────────┐  ┌───────────────┐  │
 │  │ Ingestion  │  │ Retrieval  │  │  Answering  │  │ Feedback and  │  │
 │  │ docling +  │  │ semantic + │  │ guardrails, │  │ routing, gaps,│  │
@@ -54,7 +54,7 @@
 │   │  data/  │    │ ChromaDB │    │ SQLite: documents, messages, │    │
 │   │ sources │    │ vectors  │    │ routing, gaps, metrics, evals│    │
 │   └─────────┘    └──────────┘    └──────────────────────────────┘    │
-│              LLM + embeddings via LangChain (provider set in .env)    │
+│              LLM + embeddings via LangChain (provider set in .env)   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -133,18 +133,21 @@ API docs (Swagger): http://localhost:8000/docs
 
 ```
 ├── backend/
-│   ├── app/
-│   │   ├── ingestion/      # loaders (meetings, Office), enrichment, chunking, pipeline
-│   │   ├── retrieval/      # Chroma, BM25, RRF fusion, rerank
-│   │   ├── answer/         # chat flow, guardrails, citations, confidence, business rules
-│   │   ├── routing/        # who to ask, why, draft question
-│   │   ├── feedback/       # correct / reject / rate → gaps
-│   │   ├── observability/  # metrics and alerts
-│   │   ├── evals/          # golden + synthetic evaluation
-│   │   ├── api/            # FastAPI routes
-│   │   ├── db/             # SQLite schema and repositories
-│   │   ├── llm/factory.py  # the only place model clients are built
-│   │   └── config.py       # every setting (read from .env)
+│   ├── app/                # flat: one module per concern
+│   │   ├── main.py         # FastAPI app
+│   │   ├── config.py       # every setting (read from .env)
+│   │   ├── llm.py          # the only place model clients are built
+│   │   ├── loaders.py      # meetings + Office files → documents (people from the source)
+│   │   ├── ingest.py       # enrichment, chunking, ingestion pipeline (+ CLI)
+│   │   ├── rules.py        # business rules
+│   │   ├── search.py       # Chroma + BM25 → RRF → LLM rerank
+│   │   ├── guardrails.py   # injection, topic, PII
+│   │   ├── answer.py       # chat flow, citation checks, confidence
+│   │   ├── feedback.py     # routing (who to ask) + correct / reject / rate
+│   │   ├── metrics.py      # monitoring and alerts
+│   │   ├── evals.py        # golden + synthetic evaluation (+ CLI)
+│   │   ├── api.py          # HTTP routes
+│   │   ├── db.py, schema.sql, schemas.py
 │   ├── eval/golden.jsonl
 │   ├── scripts/            # curl smoke tests for Ex1 and Ex2
 │   └── tests/
@@ -155,6 +158,7 @@ API docs (Swagger): http://localhost:8000/docs
 ├── data/                   # meetings/ and documents/ (the corpus)
 ├── docs/MEASUREMENT.md     # the 30-day metric
 ├── DELIVERABLE.md          # each requirement and where it is met
+├── TECH.md                 # technical design: chunking, retrieval, citations, evals
 └── dev.sh
 ```
 
@@ -178,6 +182,7 @@ cd ../frontend && npm run build                       # type-check + build
 | Doc | Contents |
 |---|---|
 | [`DELIVERABLE.md`](DELIVERABLE.md) | Every requirement from the brief, how it's met and where |
+| [`TECH.md`](TECH.md) | Technical design: parsing, chunking (why 512 tokens), hybrid retrieval, citation checks, confidence, routing, evals |
 | [`backend/README.md`](backend/README.md) | Providers, every setting, ingestion, every endpoint, troubleshooting |
 | [`frontend/README.md`](frontend/README.md) | Frontend pages, structure and streaming |
 | [`docs/MEASUREMENT.md`](docs/MEASUREMENT.md) | The 30-day measurement approach |
