@@ -39,6 +39,9 @@ COPY --from=frontend /app/frontend/dist /app/frontend/dist
 RUN mkdir -p storage && chown -R app:app storage /app/data
 USER app
 
-ENV PORT=8000
+# Rerank 5 candidates instead of 10: ~8 LLM calls per question instead of ~13, so a free
+# Gemini key (500 requests/day) lasts longer. Override with -e / the host's env settings.
+ENV PORT=8000 \
+    RERANK_TOP_N=5
 EXPOSE 8000
 CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
