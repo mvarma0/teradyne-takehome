@@ -120,7 +120,8 @@ cd ..
 
 **5. Load the data and ask**
 - Open **http://localhost:5173**
-- Go to **Documents** → click **Ingest changes**. The first ingest enriches all 40 files with the LLM. It takes a few minutes with a hosted API and longer on Ollama.
+- **Using the Gemini preset (C)?** The index is already built: on first start the app copies the committed, chat-free index from [`backend/seed/`](backend/seed/README.md), so you can skip the ingest.
+- **Other providers:** go to **Documents** → click **Ingest changes**. The first ingest enriches all 40 files with the LLM. It takes a few minutes with a hosted API and longer on Ollama.
 - Go to **Ask** and try: *"Why did the Volta-7 Rev A fail HTOL, and what was the fix?"* 🎉
 
 ### Useful links once it's running
@@ -142,6 +143,22 @@ cd ..
 | Windows without bash | Run the two servers in separate terminals: `cd backend && uv run uvicorn app.main:app --port 8000` and `cd frontend && npm run dev` |
 
 More settings and fixes: [`backend/README.md`](backend/README.md).
+
+---
+
+## 🐳 Run with Docker (optional)
+
+One container serves the API and the built React app. Only Docker is needed; no Python or Node.
+
+```bash
+cp backend/.env.example backend/.env      # pick a preset and add its key (step 2 above)
+docker build -t fastchip .
+docker run -p 8000:8000 -v "$PWD/backend/.env:/app/backend/.env:ro" fastchip
+```
+
+- Open **http://localhost:8000**. With the Gemini preset the index is ready immediately (copied from `backend/seed/`); with another provider, run **Documents → Ingest changes** once.
+- Mount `.env` as shown rather than `--env-file`: Docker's `--env-file` keeps inline `# comments` as part of the value.
+- Container data (chats, feedback, uploads) is lost when the container is removed.
 
 ---
 

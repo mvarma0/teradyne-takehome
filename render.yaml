@@ -1,0 +1,25 @@
+# Render Blueprint: one free Docker web service (API + React app on the same origin).
+# Render dashboard → New → Blueprint → pick this repo → enter GOOGLE_API_KEY → Deploy.
+# The image starts from the committed seed index (backend/seed/), so no key is needed at
+# build time; the Dockerfile declares no build args, so the key never enters the image.
+services:
+  - type: web
+    name: fastchip-knowledge
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: LLM_PROVIDER
+        value: google_genai
+      - key: LLM_MODEL
+        value: gemini-3.1-flash-lite
+      - key: EMBEDDING_PROVIDER
+        value: google_genai
+      - key: EMBEDDING_MODEL
+        value: gemini-embedding-001 # must match the seed index
+      - key: LLM_MAX_RPM
+        value: "14" # stay under the Gemini free tier's requests/minute
+      - key: GOOGLE_API_KEY
+        sync: false # entered in the Render dashboard, never committed
