@@ -14,6 +14,8 @@ __pycache__/
 backend/storage/*
 !backend/storage/.gitkeep
 *.db
+# Committed, chat-free index copied into empty storage on startup (see backend/seed/README.md)
+!backend/seed/app.db
 
 # Node
 node_modules/
