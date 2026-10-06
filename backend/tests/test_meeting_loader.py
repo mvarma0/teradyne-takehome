@@ -85,3 +85,19 @@ def test_product_normalization():
         "Volta-7",
         "BCD node",
     ]
+
+
+def test_revisions_and_sample_stages_are_not_products():
+    from app.ingestion.enrich import _normalize
+    from app.models.enrichment import EnrichmentResult
+
+    result = EnrichmentResult(
+        topic_domain="yield",
+        priority="high",
+        products=["Volta-7", "Rev B", "ES1", "LOT-V7-003", "AEC-Q100", "volta 7"],
+        summary="s",
+        key_topics=[],
+        decisions=[],
+        action_items=[],
+    )
+    assert _normalize(result).products == ["Volta-7"]

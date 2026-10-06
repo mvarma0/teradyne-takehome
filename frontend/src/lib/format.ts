@@ -29,6 +29,34 @@ export const initials = (name: string) =>
 export const humanize = (s: string | null | undefined) =>
   s ? s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '—'
 
+const LABELS: Record<string, string> = {
+  npi_program: 'NPI program',
+  test_engineering: 'Test engineering',
+  quality_compliance: 'Quality & compliance',
+  executive_strategy: 'Executive strategy',
+  supply_chain: 'Supply chain',
+  yield: 'Yield',
+  design: 'Design',
+  customer: 'Customer',
+  other: 'Other',
+  low_confidence: 'Low confidence',
+}
+
+/** Sentence-case label for enum values (topics, priorities, gap types). */
+export const label = (s: string | null | undefined) =>
+  !s ? '—' : (LABELS[s] ?? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' '))
+
+/** Titles written in all caps (e.g. a document banner) read better in title case. */
+export const displayTitle = (title: string | null | undefined, fallback = '') => {
+  const t = (title ?? fallback).trim()
+  if (t.length < 6 || t !== t.toUpperCase()) return t
+  return t.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase()).replace(/\b(Npi|Pe|Fa|Ate|Htol|Aec|Q100|Sop|8d)\b/g, (w) => w.toUpperCase()).replace(/\bFastchip\b/g, 'FastChip')
+}
+
+/** Label for the people attached to a source: attendees for meetings, author otherwise. */
+export const peopleLabel = (type: string, count: number) =>
+  type === 'meeting' ? 'Attendees' : count > 1 ? 'Authors' : 'Author'
+
 const NAME_KEY = 'fastchip.userName'
 export const getUserName = () => {
   try {

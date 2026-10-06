@@ -12,7 +12,7 @@ from app.models.source import SourceDoc
 
 
 def _mock_office_files(docs: Path) -> None:
-    """Small but real OOXML files (the dataset's .pptx files are plain text)."""
+    """Small but real OOXML files, plus a non-Office file that must be ignored."""
     (docs / "docx").mkdir(parents=True)
     (docs / "pptx").mkdir()
     (docs / "xlsx").mkdir()

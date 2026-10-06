@@ -94,7 +94,7 @@ def citation_payload(n: int, chunk: RetrievedChunk) -> dict:
         "attendees": attendees,
         "authors": authors,
         "people": authors or attendees,
-        "people_label": "Author" if authors else "Attendees",
+        "people_label": "Attendees" if m["source_type"] == "meeting" else "Author",
         "topic_domain": m.get("topic_domain"),
         "priority": m.get("priority"),
         "products": split(m.get("products")),
@@ -111,7 +111,7 @@ def citation_payload(n: int, chunk: RetrievedChunk) -> dict:
 def _format_context(citations: list[dict], chunks: list[RetrievedChunk]) -> str:
     blocks = []
     for c, chunk in zip(citations, chunks, strict=True):
-        people = ", ".join(c["people"]) or "unknown"
+        people = ", ".join(c["people"]) or "not recorded"
         blocks.append(
             f"[{c['n']}] {c['source_file']} | {c['title']} | {c['date'] or 'undated'} | "
             f"{c['people_label'].lower()}: {people}\n{chunk.document.page_content}"

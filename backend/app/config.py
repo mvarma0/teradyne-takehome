@@ -9,24 +9,35 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
-Provider = Literal["openai", "ollama"]
-
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=BACKEND_DIR / ".env", extra="ignore")
 
     app_env: Literal["dev", "test", "prod"] = "dev"
-    openai_api_key: str = ""
-    ollama_base_url: str = "http://localhost:11434"
 
+    # Models. A provider is any LangChain provider id (openai, google_genai, ollama,
+    # anthropic, groq, mistralai, azure_openai, ...); see app/llm/factory.py.
     # LLM: enrichment, answer generation, reranking
-    llm_provider: Provider = "openai"
-    llm_model: str = "gpt-4o-mini"  # ollama e.g. qwen2.5:7b
+    llm_provider: str = "openai"
+    llm_model: str = "gpt-4o-mini"  # google_genai e.g. gemini-flash-lite-latest; ollama qwen2.5:7b
     llm_temperature: float = 0.0
+    llm_base_url: str = ""  # OpenAI-compatible endpoint or a remote Ollama host
+    llm_api_key: str = ""  # overrides the provider's own key variable (e.g. OPENAI_API_KEY)
+    llm_structured_output: Literal["auto", "function_calling", "json_schema", "json_mode"] = "auto"
+    llm_max_rpm: int = 0  # client-side rate limit in requests/minute (0 = off)
+    llm_max_retries: int = 3
 
     # Embeddings
-    embedding_provider: Provider = "openai"
+    embedding_provider: str = "openai"
     embedding_model: str = "text-embedding-3-small"  # ollama e.g. nomic-embed-text
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+
+    # Provider credentials and hosts (read from .env or the process environment)
+    openai_api_key: str = ""
+    google_api_key: str = ""
+    anthropic_api_key: str = ""
+    ollama_base_url: str = "http://localhost:11434"
 
     # Ingestion: docling parsing + structure-aware recursive chunking (token budgets)
     use_docling: bool = True
@@ -75,6 +86,11 @@ class Settings(BaseSettings):
     @classmethod
     def _resolve_relative_to_backend(cls, v: Path) -> Path:
         return v if v.is_absolute() else (BACKEND_DIR / v).resolve()
+
+    @field_validator("llm_provider", "embedding_provider")
+    @classmethod
+    def _normalize_provider(cls, v: str) -> str:
+        return v.strip().lower()
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -14,7 +14,7 @@ cp .env.example .env         # then edit .env (see section 2)
 
 ---
 
-## 2. Configuration: OpenAI or Ollama
+## 2. Configuration: choosing model providers
 
 **All configuration goes in `backend/.env`.** You never edit code to switch models.
 
@@ -24,7 +24,7 @@ cp .env.example .env         # then edit .env (see section 2)
 2. `backend/.env`
 3. Default in `app/config.py`
 
-The **LLM** and the **embedding model** are chosen independently.
+The **LLM** and the **embedding model** are chosen independently. A provider is any [LangChain provider id](https://python.langchain.com/docs/integrations/chat/); clients are built with `init_chat_model` / `init_embeddings` in `app/llm/factory.py`, so switching provider never needs a code change. `openai`, `google_genai` and `ollama` are installed; the options below are presets.
 
 ### Option A: OpenAI
 
@@ -52,6 +52,31 @@ EMBEDDING_PROVIDER=ollama
 EMBEDDING_MODEL=nomic-embed-text
 ```
 
+### Option C: Google Gemini (free tier available)
+
+```env
+GOOGLE_API_KEY=...
+LLM_PROVIDER=google_genai
+LLM_MODEL=gemini-3.1-flash-lite
+EMBEDDING_PROVIDER=google_genai
+EMBEDDING_MODEL=gemini-embedding-001
+LLM_MAX_RPM=15               # stay under the free tier's per-minute limit
+```
+
+### Any other provider
+
+```bash
+uv add langchain-anthropic   # or langchain-groq, langchain-mistralai, ...
+```
+
+```env
+ANTHROPIC_API_KEY=...
+LLM_PROVIDER=anthropic
+LLM_MODEL=<model name>
+```
+
+An **OpenAI-compatible endpoint** (vLLM, LM Studio, GitHub Models, ...) uses `LLM_PROVIDER=openai` with `LLM_BASE_URL` and `LLM_API_KEY`.
+
 ### Mixing providers
 
 For example, local embeddings with an OpenAI LLM:
@@ -77,17 +102,21 @@ EMBEDDING_MODEL=nomic-embed-text
 - **Changing the embedding model requires re-ingesting.** Each embedding model gets its own Chroma collection (e.g. `fastchip__ollama-nomic-embed-text`), so vectors from different models never mix. Run `POST /api/ingest` after switching.
 - **Changing the LLM** doesn't require re-ingesting. To re-derive metadata with the new LLM, ingest with `{"force": true}`.
 - `GET /api/stats` shows the active providers and collection.
-- With `*_PROVIDER=openai` and no `OPENAI_API_KEY`, calls return **HTTP 503** with a clear message.
+- A provider with no API key set (e.g. `openai` without `OPENAI_API_KEY`), or whose LangChain package isn't installed, returns **HTTP 503** with a clear message.
 
 ### All settings (`.env`)
 
 | Setting | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | (empty) | Required when any provider is `openai` |
+| `OPENAI_API_KEY` / `GOOGLE_API_KEY` / `<PROVIDER>_API_KEY` | (empty) | Key for the provider in use |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
-| `LLM_PROVIDER` / `LLM_MODEL` | `openai` / `gpt-4o-mini` | LLM (`openai` or `ollama`) |
+| `LLM_PROVIDER` / `LLM_MODEL` | `openai` / `gpt-4o-mini` | LLM: any LangChain provider id (`openai`, `google_genai`, `ollama`, ...) |
 | `LLM_TEMPERATURE` | `0` | LLM temperature |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | `openai` / `text-embedding-3-small` | Embeddings (`openai` or `ollama`) |
+| `LLM_BASE_URL` / `LLM_API_KEY` | (empty) | Optional endpoint and key override (OpenAI-compatible servers) |
+| `LLM_STRUCTURED_OUTPUT` | `auto` | Structured-output method; `auto` picks the best per provider |
+| `LLM_MAX_RPM` / `LLM_MAX_RETRIES` | `0` / `3` | Client-side rate limit (0 = off) and retries, for rate-limited tiers |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | `openai` / `text-embedding-3-small` | Embeddings: any LangChain provider id |
+| `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` | (empty) | Optional endpoint and key override |
 | `USE_DOCLING` | `true` | Parse documents with docling |
 | `CHUNK_MAX_TOKENS` | `512` | Upper bound per chunk; sections under this stay whole |
 | `CHUNK_MIN_TOKENS` | `80` | Smaller sections merge with a neighbour |

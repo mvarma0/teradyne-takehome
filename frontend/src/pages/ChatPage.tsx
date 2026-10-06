@@ -1,12 +1,12 @@
-import { MessageSquarePlus, MessagesSquare, Sparkles, Trash2 } from 'lucide-react'
+import { CornerDownLeft } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api, streamChat } from '../api/client'
 import { AssistantMessage, Composer, SUGGESTIONS, UserBubble, type UiMessage } from '../components/chat'
 import { DocumentDrawer } from '../components/citations'
 import { cn, Spinner } from '../components/ui'
-import { relativeTime } from '../lib/format'
-import type { AnswerPayload, Citation, Conversation, QueryFilters, StoredMessage } from '../types'
+import { useConversations } from '../lib/conversationsContext'
+import type { AnswerPayload, Citation, QueryFilters, StoredMessage } from '../types'
 
 let keySeq = 0
 const nextKey = () => `m${++keySeq}`
@@ -20,7 +20,8 @@ function fromStored(m: StoredMessage): UiMessage {
 export default function ChatPage() {
   const { conversationId } = useParams()
   const navigate = useNavigate()
-  const [conversations, setConversations] = useState<Conversation[]>([])
+  const { refresh: refreshConversations } = useConversations()
+  const [counts, setCounts] = useState<Record<string, number> | null>(null)
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [loading, setLoading] = useState(false)
   const [streaming, setStreaming] = useState(false)
@@ -30,21 +31,25 @@ export default function ChatPage() {
   const createdHere = useRef<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const refreshConversations = useCallback(() => {
-    api.conversations().then(setConversations).catch(() => {})
-  }, [])
-
   useEffect(() => {
-    refreshConversations()
-    api.stats().then((s) => setThreshold(s.confidence_threshold)).catch(() => {})
-  }, [refreshConversations])
+    api
+      .stats()
+      .then((s) => {
+        setThreshold(s.confidence_threshold)
+        setCounts(s.by_type)
+      })
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (!conversationId) {
       if (!streaming) setMessages([])
       return
     }
-    if (createdHere.current === conversationId) return // just created by our own stream
+    if (createdHere.current === conversationId) {
+      createdHere.current = null // just created by our own stream; reload on the next visit
+      return
+    }
     setLoading(true)
     api
       .conversation(conversationId)
@@ -121,122 +126,84 @@ export default function ChatPage() {
 
   const openCitation = useCallback((c: Citation) => setDrawer({ docId: c.doc_id, chunkId: c.chunk_id }), [])
 
-  const remove = async (id: string) => {
-    await api.deleteConversation(id)
-    if (id === conversationId) navigate('/chat')
-    refreshConversations()
-  }
-
+  const empty = !loading && messages.length === 0
   return (
-    <div className="flex h-full">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white/60 md:flex dark:border-slate-800 dark:bg-slate-900/40">
-        <div className="p-3">
-          <Link
-            to="/chat"
-            onClick={() => {
-              createdHere.current = null
-              setMessages([])
-            }}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white py-2 text-sm font-medium shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800"
-          >
-            <MessageSquarePlus className="size-4" /> New chat
-          </Link>
-        </div>
-        <div className="flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
-          {conversations.length === 0 && <p className="px-2 py-4 text-xs text-slate-400">No conversations yet</p>}
-          {conversations.map((c) => (
-            <div
-              key={c.id}
-              className={cn(
-                'group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm',
-                c.id === conversationId
-                  ? 'bg-slate-200/70 dark:bg-slate-800'
-                  : 'hover:bg-slate-100 dark:hover:bg-slate-800/60',
-              )}
-            >
-              <Link to={`/chat/${c.id}`} className="min-w-0 flex-1" onClick={() => (createdHere.current = null)}>
-                <p className="truncate">{c.title}</p>
-                <p className="text-[11px] text-slate-400">{relativeTime(c.updated_at)}</p>
-              </Link>
-              <button
-                onClick={() => remove(c.id)}
-                className="rounded p-1 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-rose-600"
-                title="Delete conversation"
-              >
-                <Trash2 className="size-3.5" />
-              </button>
+    <div className="flex h-full flex-col">
+      <div className="flex-1 overflow-y-auto">
+        <div className={cn('mx-auto px-6 lg:px-10', empty ? 'max-w-2xl' : 'max-w-[1180px] py-10')}>
+          {loading && (
+            <div className="flex justify-center py-10">
+              <Spinner />
             </div>
-          ))}
-        </div>
-      </aside>
-
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-3xl px-4 py-6">
-            {loading && (
-              <div className="flex justify-center py-10">
-                <Spinner />
-              </div>
+          )}
+          {empty && <Welcome counts={counts} onPick={(t) => send(t, null)} />}
+          <div className="space-y-8">
+            {messages.map((m) =>
+              m.role === 'user' ? (
+                <UserBubble key={m.key} text={m.content} />
+              ) : (
+                <AssistantMessage
+                  key={m.key}
+                  msg={m}
+                  threshold={threshold}
+                  onOpenCitation={openCitation}
+                  onPatch={(patch: Partial<AnswerPayload>) =>
+                    patchAssistant(m.key, (x) => (x.payload ? { ...x, payload: { ...x.payload, ...patch } } : x))
+                  }
+                />
+              ),
             )}
-            {!loading && messages.length === 0 && <Welcome onPick={(t) => send(t, null)} />}
-            <div className="space-y-6">
-              {messages.map((m) =>
-                m.role === 'user' ? (
-                  <UserBubble key={m.key} text={m.content} />
-                ) : (
-                  <AssistantMessage
-                    key={m.key}
-                    msg={m}
-                    threshold={threshold}
-                    onOpenCitation={openCitation}
-                    onPatch={(patch: Partial<AnswerPayload>) =>
-                      patchAssistant(m.key, (x) => (x.payload ? { ...x, payload: { ...x.payload, ...patch } } : x))
-                    }
-                  />
-                ),
-              )}
-            </div>
-            <div ref={bottomRef} className="h-4" />
           </div>
+          <div ref={bottomRef} className="h-4" />
         </div>
-        <div className="mx-auto w-full max-w-3xl px-4 pb-4">
-          <Composer onSend={send} disabled={streaming} onStop={() => abortRef.current?.abort()} />
-          <p className="mt-2 text-center text-[11px] text-slate-400">
-            Answers cite meetings and documents. Hover a citation for the source; click to open it.
-          </p>
-        </div>
+      </div>
+      <div className={cn('mx-auto w-full px-6 pb-5 lg:px-10', empty ? 'max-w-2xl' : 'max-w-[1180px] lg:pr-[calc(320px+3rem+2.5rem)]')}>
+        <Composer onSend={send} disabled={streaming} onStop={() => abortRef.current?.abort()} />
+        <p className="mt-2 text-center text-[11px] text-slate-500">
+          Every statement cites its source. Point at a number to see the source; click it to open the passage.
+        </p>
       </div>
       <DocumentDrawer docId={drawer?.docId ?? null} chunkId={drawer?.chunkId} onClose={() => setDrawer(null)} />
     </div>
   )
 }
 
-function Welcome({ onPick }: { onPick: (text: string) => void }) {
+const SOURCE_WORDS: [string, string, string][] = [
+  ['meeting', 'meeting transcript', 'meeting transcripts'],
+  ['docx', 'Word document', 'Word documents'],
+  ['pptx', 'slide deck', 'slide decks'],
+  ['xlsx', 'spreadsheet', 'spreadsheets'],
+]
+
+function Welcome({ counts, onPick }: { counts: Record<string, number> | null; onPick: (text: string) => void }) {
+  const parts = SOURCE_WORDS.filter(([k]) => counts?.[k]).map(([k, one, many]) => `${counts![k]} ${counts![k] === 1 ? one : many}`)
+  const corpus = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]
   return (
-    <div className="flex flex-col items-center pt-10 pb-8 text-center">
-      <div className="mb-4 flex size-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-500 to-violet-500 text-white shadow-lg shadow-brand-500/30">
-        <Sparkles className="size-6" />
-      </div>
-      <h1 className="text-2xl font-semibold tracking-tight">Ask FastChip's knowledge base</h1>
-      <p className="mt-2 max-w-md text-sm text-slate-500 dark:text-slate-400">
-        Answers come from meeting transcripts and Office documents, with citations to the source file and the
-        people involved. When I'm not sure, I'll suggest who to ask.
+    <div className="pt-[14vh] pb-8">
+      <h1 className="text-[32px] leading-tight font-semibold tracking-tight text-slate-900 dark:text-white">
+        What do you need to know?
+      </h1>
+      <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-slate-600 dark:text-slate-400">
+        Answers come from {corpus ?? "FastChip's meetings and documents"}. Each statement names its source file and
+        the people behind it. If the sources don't settle a question, you'll get the right person to ask.
       </p>
-      <div className="mt-8 grid w-full gap-2 sm:grid-cols-2">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s.text}
-            onClick={() => onPick(s.text)}
-            className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-white p-3 text-left text-sm shadow-sm transition hover:border-brand-500 hover:shadow dark:border-slate-800 dark:bg-slate-900"
-          >
-            <span className="mt-0.5 text-brand-600 dark:text-brand-100">{s.icon}</span>
-            <span>{s.text}</span>
-          </button>
-        ))}
+      <div className="mt-8">
+        <h2 className="mb-2 text-xs font-medium text-slate-500">Try asking</h2>
+        <ul className="divide-y divide-slate-200/80 border-y border-slate-200/80 dark:divide-slate-800 dark:border-slate-800">
+          {SUGGESTIONS.map((s) => (
+            <li key={s.text}>
+              <button
+                onClick={() => onPick(s.text)}
+                className="group flex w-full items-center gap-3 py-2.5 text-left text-sm text-slate-700 transition-colors hover:text-brand-700 dark:text-slate-300 dark:hover:text-brand-200"
+              >
+                <span className="text-slate-400 group-hover:text-brand-600">{s.icon}</span>
+                <span className="flex-1">{s.text}</span>
+                <CornerDownLeft className="size-3.5 text-slate-300 opacity-0 transition-opacity group-hover:opacity-100" />
+              </button>
+            </li>
+          ))}
+        </ul>
       </div>
-      <p className="mt-6 flex items-center gap-1.5 text-xs text-slate-400">
-        <MessagesSquare className="size-3.5" /> Follow-up questions keep the conversation context.
-      </p>
     </div>
   )
 }

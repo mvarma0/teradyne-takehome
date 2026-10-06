@@ -15,8 +15,8 @@ The original brief is in `take-home-assignment.md`. **`TASKS.md` is the executio
 - **People fields (attendees, authors) come only from source parsing, never from the LLM.** The LLM derives topic, priority, products, summary, decisions and action items.
 - **Every claim in an answer must cite a retrieved chunk.** Claims with invalid citations are dropped, not shown.
 - **Nothing constructs LLM or embedding clients directly.** Always use `app/llm/factory.py` (`get_llm()`, `get_embeddings()`). All tunables live in `app/config.py` (pydantic-settings, `.env`).
-- **No fake models.** Providers are `openai` or `ollama` only. Tests run against local Ollama (`qwen2.5:7b`, `nomic-embed-text`); the integration test is skipped if Ollama is unavailable. Test fixtures live in `backend/tests/fixtures/`, never in `data/`, and stay small.
-- Don't read `data/` content unless the user asks (only `data/documents/docx/yield_improvement_report_q1.docx` was read, to write `eval/golden.jsonl`).
+- **No fake models.** Providers are real LangChain providers chosen in `.env` (`openai`, `google_genai`, `ollama` installed; others via `uv add langchain-<provider>`), built only through `init_chat_model`/`init_embeddings` in the factory. Tests run against local Ollama (`qwen2.5:7b`, `nomic-embed-text`); the integration test is skipped if Ollama is unavailable. Test fixtures live in `backend/tests/fixtures/`, never in `data/`, and stay small.
+- Don't read `data/` content unless the user asks (`data/documents/docx/yield_improvement_report_q1.docx` was read to write `eval/golden.jsonl`; during the real-data run, Office properties and sheet headers were inspected to debug missing authors/dates).
 - Business rules live in one place, `app/answer/business_rules.py`, and are applied identically to all source types.
 
 ## Company context (FastChip Semiconductor, all fictional)
@@ -36,13 +36,13 @@ This is the brief's context. **The actual dataset differs**: it centres on the V
 
 ## Dataset (in `data/`, read-only)
 - `data/meetings/`: 20 plain-text `.md` transcripts. Header lines: `Meeting:`, `Date: … Time: … Location: …`, `Attendees: Name (Role), …`, `Meeting Type:`. Then plain section labels (`Discussion`, `Decisions`, `Action Items`) and `Name: text` speaker turns.
-- `data/documents/docx/` (5): corrective_action_8d, failure_analysis_htol, npi_checklist_volta7, pe_division_sop, yield_improvement_report_q1. Core properties are empty or generic; author, title, date and reviewers are in body lines like `**Author:** Name, Role`.
-- `data/documents/pptx/` (5 `.pptx` + 5 `_slides.md`): the `.pptx` files are **plain UTF-8 text, byte-identical to their `_slides.md`**, not real OOXML. They're ingested through the text fallback and flagged in the report. `_slides.md` files aren't ingested (only Office extensions are read from `documents/`).
-- `data/documents/xlsx/` (5): action_item_tracker, defect_pareto_log, reliability_test_matrix, test_time_breakdown, yield_tracker.
+- `data/documents/docx/` (5): corrective_action_8d, failure_analysis_htol, npi_checklist_volta7, pe_division_sop, yield_improvement_report_q1. Real OOXML; the author is in core properties, and body lines like `**Author:** Name, Role` / reviewers are also parsed. `npi_checklist_volta7.docx` carries python-docx's template timestamp, which the loader ignores (it is undated).
+- `data/documents/pptx/` (5): real OOXML decks (the earlier plain-text `.pptx` and `_slides.md` copies were rebuilt/removed); author from core properties, one section per slide plus speaker notes. The loader's text fallback still handles non-OOXML files with an Office extension.
+- `data/documents/xlsx/` (5): action_item_tracker, defect_pareto_log, reliability_test_matrix, test_time_breakdown, yield_tracker. They had no core properties; author, title and date were added (user-approved data change, sheet contents unchanged). If a sheet has no date property, the loader uses the latest row date.
 
 ## Tech stack
 - Backend: Python 3.12, **uv**, FastAPI, LangChain (splitters, chains, structured output), **docling** (document parsing), **ChromaDB** (vectors), **rank-bm25** (lexical), **SQLite** (structured business data).
-- Models (per component, via `.env`): `openai` (`gpt-4o-mini`, `text-embedding-3-small`) or `ollama` (`qwen2.5:7b`, `nomic-embed-text`).
+- Models (per component, via `.env`, any LangChain provider): `openai` (`gpt-4o-mini`, `text-embedding-3-small`), `google_genai` (`gemini-3.1-flash-lite`, `gemini-embedding-001`) or `ollama` (`qwen2.5:7b`, `nomic-embed-text`).
 - Frontend: React 19 + Vite + TypeScript + Tailwind v4 (+ typography), react-router, react-markdown, recharts, lucide-react. The dev server proxies `/api` → `http://127.0.0.1:8000`.
 
 ## Commands

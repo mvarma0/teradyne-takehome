@@ -13,7 +13,7 @@ from app.models.source import SourceDoc
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 SYSTEM = """You extract structured metadata from internal documents of a mid-size automotive
 semiconductor company (HQ Austin TX, design center Portland OR, fab/test in Penang Malaysia)
@@ -39,7 +39,11 @@ priority:
 - low: routine status, informational
 - none: priority not applicable
 
-Rules: use only facts in the text. Product names exactly as in the text (e.g. "Volta-7").
+products: the company's own chips/devices only, exactly as named in the text (e.g.
+"Volta-7"). Not customers or other companies, silicon revisions (Rev A, Rev B), sample
+stages (ES1, CS), lot/wafer IDs, standards (AEC-Q100) or test names.
+
+Rules: use only facts in the text.
 Action item owners must be people named in the text. Do not invent dates."""
 
 HUMAN = """Title: {title}
@@ -53,6 +57,12 @@ Content:
 _PROMPT = ChatPromptTemplate.from_messages([("system", SYSTEM), ("human", HUMAN)])
 
 _PRODUCT_CODE = re.compile(r"^([A-Za-z]+)[\s_-]*(\d+[A-Za-z]?)$")
+# Identifiers that small models list as products but are revisions, sample stages, lots or
+# standards. The rule is generic (no product names), like the rest of the prompt.
+_NOT_PRODUCT = re.compile(
+    r"^(?:rev(?:ision)?[\s_-]*[a-z0-9]{1,2}|[ec]s[\s_-]*\d*|lot\b.*|wafer\b.*|aec-?q\d+.*)$",
+    re.I,
+)
 
 
 def normalize_product(name: str) -> str:
@@ -64,7 +74,11 @@ def normalize_product(name: str) -> str:
 
 
 def _normalize(result: EnrichmentResult) -> EnrichmentResult:
-    products = dict.fromkeys(normalize_product(p) for p in result.products if p.strip())
+    products = dict.fromkeys(
+        normalize_product(p)
+        for p in result.products
+        if p.strip() and not _NOT_PRODUCT.match(p.strip())
+    )
     return result.model_copy(update={"products": list(products)})
 
 

@@ -2,7 +2,7 @@
 
 'llm' is a pointwise LLM judge: each fused candidate gets its own relevance call (run
 concurrently with ``batch``), so scores can never be misaligned with passages, which
-listwise prompts suffer from on small local models. Works with OpenAI or Ollama.
+listwise prompts suffer from on small local models. Works with any configured provider.
 'none' keeps the fused order.
 """
 

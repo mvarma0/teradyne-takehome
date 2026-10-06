@@ -80,6 +80,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
 - [ ] **1.10 Real-data run** (when `data/meetings/` is complete)
   - Verify: `POST /api/ingest` → `files_found` = 20, `failed` = []; check `warnings` for files without attendee lists; spot-check `GET /api/documents` topics/priorities; run `./scripts/smoke_ex1.sh`
   - Status: To do: waiting for the full real-data run (`data/` now has 20 meetings + 15 documents).
+  - Status (T3 run, Gemini `gemini-3.1-flash-lite` + `gemini-embedding-001`): ingest of all 35 files done (0 failed, 173 chunks); `smoke_ex1.sh` updated for the current payload and passes on real data. **Pending:** re-ingest the 5 spreadsheets after their author properties were added, then mark done.
 
 ---
 
@@ -105,6 +106,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Status: Done: in `office.py`, one `## Sheet: name` section per sheet (docling markdown tables); tables split by rows with the header repeated (`chunking.py`).
 
 - [~] **2.4 Legacy formats + unified pipeline**
+  - Status (T3 run): 35 docs ingested on real data (20 meeting, 5 docx, 5 pptx, 5 xlsx). The 5 spreadsheets had no author/date properties; added author, title and date (user-approved data change, sheet contents unchanged; openpyxl + docling read them). **Pending:** re-ingest them; a LibreOffice check could not run here (Calc not installed in the sandbox).
   - Files: `app/ingestion/loaders/legacy.py`, `app/ingestion/loaders/__init__.py` (extension registry), `app/ingestion/pipeline.py`, `app/ingestion/chunking.py` (keep location metadata)
   - Accept: `.doc/.ppt/.xls` converted with `soffice --headless --convert-to` if available, else skipped with a warning; all types share one SourceDoc/enrichment path
   - Verify: `uv run python -m app.ingestion` → 35 docs; `curl -s 'localhost:8000/api/documents?source_type=xlsx' | jq length` → 5
@@ -169,12 +171,14 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Accept: reports hit@k, MRR, citation validity and answerability on unanswerable controls; non-zero exit below the target (used as a regression gate); calibrate `CONFIDENCE_THRESHOLD`
   - Verify: `uv run python -m eval.run_eval` prints the report; hit@5 ≥ 0.8
   - Status: In progress: `eval/golden.jsonl` (11 questions from one docx + 3 controls), runner in `app/evals/` (`uv run python -m app.evals`), synthetic generator. Synthetic run verified on demo data. Still open: the golden run on real data and threshold calibration.
+  - Status (T3 run): **Pending:** extend the golden set across meetings/docx/pptx/xlsx, run it on real data, calibrate `CONFIDENCE_THRESHOLD`. Note: the Gemini free tier allows 15 requests/min per model (`LLM_MAX_RPM=14`), so a question takes about a minute.
 
 - [x] **2.15 Ex2 smoke** ✅ CHECKPOINT
   - Files: `scripts/smoke_ex2.sh`
   - Accept: covers a meeting + office answer, citations with people, a low-confidence routing, reject, correct, gaps, review queue and metrics
   - Verify: `uv run pytest` && `./scripts/smoke_ex2.sh` green
   - Status: Done (on fixtures + mock Office files): `./scripts/smoke_ex2.sh` all checks passed against a live server, and the Ollama integration test passes. Re-run on real data with 1.10 / 2.4.
+  - Status (T3 run): **Pending:** on real data it failed "every citation has source file + author" because `yield_tracker.xlsx` had no author; fixed in the data, re-run after the spreadsheet re-ingest.
 
 ---
 

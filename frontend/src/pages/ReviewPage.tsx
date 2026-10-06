@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import { DocumentDrawer, SourceCard } from '../components/citations'
 import { ConfidenceMeter } from '../components/meta'
 import { Badge, Button, Card, cn, EmptyState, ErrorBanner, inputClass, PageHeader, Spinner, type Tone } from '../components/ui'
-import { relativeTime } from '../lib/format'
+import { label, relativeTime } from '../lib/format'
 import type { Citation, Gap } from '../types'
 
 const TYPE_META: Record<Gap['type'], { label: string; tone: Tone }> = {
@@ -47,14 +47,14 @@ export default function ReviewPage() {
         <CountTile label="Corrections" value={counts?.by_type.correction ?? 0} />
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <div className="flex rounded-lg border border-slate-200 bg-white p-0.5 text-sm dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex rounded-md border border-slate-300/80 bg-white p-0.5 text-sm dark:border-slate-700 dark:bg-[#121a1d]">
           {['pending', 'reviewed', 'resolved', ''].map((s) => (
             <button
               key={s || 'all'}
               onClick={() => setStatus(s)}
               className={cn(
                 'rounded-md px-3 py-1 capitalize',
-                status === s ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-600 dark:text-slate-400',
+                status === s ? 'bg-brand-600 text-white dark:bg-brand-500' : 'text-slate-600 dark:text-slate-400',
               )}
             >
               {s || 'all'}
@@ -116,7 +116,7 @@ function GapCard({ gap: g, onChange, onOpen }: { gap: Gap; onChange: () => void;
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <Badge tone={meta.tone}>{meta.label}</Badge>
-            <Badge tone={STATUS_TONE[g.review_status]}>{g.review_status}</Badge>
+            <Badge tone={STATUS_TONE[g.review_status]}>{label(g.review_status)}</Badge>
             {sent.length > 0 && (
               <Badge tone="green">
                 <Send className="size-3" /> Asked {sent.map((r) => r.person).join(', ')}
@@ -146,20 +146,20 @@ function GapCard({ gap: g, onChange, onOpen }: { gap: Gap; onChange: () => void;
         <div className="space-y-4 border-t border-slate-100 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-950/30">
           {g.original_answer && (
             <div>
-              <h4 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Original answer</h4>
-              <p className="rounded-lg bg-white p-3 text-sm whitespace-pre-wrap dark:bg-slate-900">{g.original_answer}</p>
+              <h4 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Original answer</h4>
+              <p className="rounded-lg bg-white p-3 text-sm whitespace-pre-wrap dark:bg-[#121a1d]">{g.original_answer}</p>
             </div>
           )}
           {g.routing.length > 0 && (
             <div>
-              <h4 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Routing</h4>
+              <h4 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Routing</h4>
               <div className="space-y-2">
                 {g.routing.map((r) => (
-                  <div key={r.routing_id ?? r.id} className="rounded-lg bg-white p-3 text-sm dark:bg-slate-900">
+                  <div key={r.routing_id ?? r.id} className="rounded-md bg-white p-3 text-sm dark:bg-[#121a1d]">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-medium">{r.person}</span>
                       {r.role && <span className="text-xs text-slate-500">{r.role}</span>}
-                      <Badge tone={r.status === 'sent' ? 'green' : 'slate'}>{r.status}</Badge>
+                      <Badge tone={r.status === 'sent' ? 'green' : 'slate'}>{label(r.status)}</Badge>
                     </div>
                     <p className="mt-1 text-xs text-slate-500">{r.reason}</p>
                     <p className="mt-1.5 text-[13px] italic">“{r.edited_question ?? r.draft_question}”</p>
@@ -170,10 +170,10 @@ function GapCard({ gap: g, onChange, onOpen }: { gap: Gap; onChange: () => void;
           )}
           {g.citations.length > 0 && (
             <div>
-              <h4 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Retrieved sources</h4>
+              <h4 className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">Retrieved sources</h4>
               <div className="grid gap-2 md:grid-cols-2">
                 {g.citations.slice(0, 4).map((c) => (
-                  <div key={c.chunk_id} className="rounded-lg bg-white p-3 dark:bg-slate-900">
+                  <div key={c.chunk_id} className="rounded-md bg-white p-3 dark:bg-[#121a1d]">
                     <SourceCard citation={c} onOpen={onOpen} compact />
                   </div>
                 ))}

@@ -9,6 +9,8 @@ Each chunk is prefixed with a context line (title, date, section path) to help b
 semantic and BM25 retrieval.
 """
 
+import logging
+import math
 import re
 from functools import lru_cache
 
@@ -20,17 +22,32 @@ from app.config import get_settings
 from app.models.enrichment import EnrichmentResult
 from app.models.source import SourceDoc
 
+log = logging.getLogger(__name__)
+
 _HEADERS = [("#", "h1"), ("##", "h2"), ("###", "h3")]
 _SEPARATORS = ["\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " ", ""]
 
 
+_WORDS = re.compile(r"\w+|[^\w\s]")
+
+
 @lru_cache(maxsize=1)
-def _encoding() -> tiktoken.Encoding:
-    return tiktoken.get_encoding("cl100k_base")
+def _encoding() -> tiktoken.Encoding | None:
+    """cl100k_base, downloaded once by tiktoken; None when offline and not cached."""
+    try:
+        return tiktoken.get_encoding("cl100k_base")
+    except Exception as exc:  # network / proxy errors from the first download
+        log.warning("tiktoken encoding unavailable (%s); using an estimated token count", exc)
+        return None
 
 
 def count_tokens(text: str) -> int:
-    return len(_encoding().encode(text))
+    enc = _encoding()
+    if enc is not None:
+        return len(enc.encode(text))
+    # Offline estimate: ~4 characters per token per word, each punctuation mark one token.
+    # It slightly overestimates cl100k, which is safe because budgets are upper bounds.
+    return sum(max(1, math.ceil(len(w) / 4)) for w in _WORDS.findall(text))
 
 
 def _section_path(meta: dict) -> str:

@@ -25,7 +25,7 @@ export function Button({
         size === 'sm' ? 'h-8 px-2.5 text-xs' : 'h-9 px-3.5 text-sm',
         variant === 'primary' && 'bg-brand-600 text-white shadow-sm hover:bg-brand-700',
         variant === 'secondary' &&
-          'border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800',
+          'border border-slate-300/80 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-[#121a1d] dark:text-slate-200 dark:hover:bg-slate-800',
         variant === 'ghost' &&
           'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800',
         variant === 'danger' && 'bg-rose-600 text-white hover:bg-rose-700',
@@ -39,13 +39,14 @@ export function Button({
 }
 
 const BADGE_TONES = {
-  slate: 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
-  brand: 'bg-brand-50 text-brand-700 ring-brand-100 dark:bg-brand-700/20 dark:text-brand-100 dark:ring-brand-700/40',
+  slate: 'bg-slate-100 text-slate-700 ring-slate-200/70 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
+  brand: 'bg-brand-50 text-brand-700 ring-brand-100 dark:bg-brand-900/50 dark:text-brand-100 dark:ring-brand-700/50',
   green: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-800',
   amber: 'bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:ring-amber-800',
   red: 'bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-900/30 dark:text-rose-300 dark:ring-rose-800',
   blue: 'bg-sky-50 text-sky-700 ring-sky-200 dark:bg-sky-900/30 dark:text-sky-300 dark:ring-sky-800',
-  violet: 'bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-900/30 dark:text-violet-300 dark:ring-violet-800',
+  violet: 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
+  outline: 'bg-transparent text-slate-600 ring-slate-300 dark:text-slate-300 dark:ring-slate-600',
 } as const
 export type Tone = keyof typeof BADGE_TONES
 
@@ -59,7 +60,7 @@ export function Badge({ tone = 'slate', className, children, title }: {
     <span
       title={title}
       className={clsx(
-        'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset',
+        'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset',
         BADGE_TONES[tone],
         className,
       )}
@@ -73,7 +74,7 @@ export function Card({ className, children }: { className?: string; children: Re
   return (
     <div
       className={clsx(
-        'rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900',
+        'rounded-lg border border-slate-200/90 bg-white dark:border-slate-800 dark:bg-[#121a1d]',
         className,
       )}
     >
@@ -122,7 +123,7 @@ export function Modal({ open, onClose, title, children, footer }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+      <div className="relative w-full max-w-lg rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-[#121a1d]">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3.5 dark:border-slate-800">
           <h2 className="font-semibold">{title}</h2>
           <button onClick={onClose} className="rounded-md p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
@@ -145,7 +146,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   return (
     <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {subtitle && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}

@@ -13,6 +13,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+from datetime import date as Date
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
@@ -65,6 +67,9 @@ _GENERIC_TITLES = {
     "untitled",
     "title",
 }
+# Creation timestamps baked into the default templates of python-docx / python-pptx: a file
+# generated from them carries these dates, which say nothing about the document.
+_TEMPLATE_TIMESTAMPS = {datetime(2013, 12, 23, 23, 15), datetime(2013, 1, 27, 9, 14, 16)}
 _DATE_RE = re.compile(_LABEL.format(labels="date|report date|revision date|as of"), re.I | re.M)
 
 
@@ -161,6 +166,27 @@ def _slide_notes(path: Path) -> dict[int, str]:
     return notes
 
 
+def _sheet_as_of(path: Path) -> str | None:
+    """Latest date in a sheet's date columns (not due/target dates): the data's "as of" date."""
+    from openpyxl import load_workbook
+
+    latest: Date | None = None
+    for ws in load_workbook(str(path), read_only=True, data_only=True).worksheets:
+        rows = ws.iter_rows(values_only=True)
+        header = [str(h or "").lower() for h in next(rows, ())]
+        cols = [
+            i
+            for i, h in enumerate(header)
+            if "date" in h and not any(w in h for w in ("due", "target", "planned"))
+        ]
+        for row in rows:
+            for i in cols:
+                iso = parse_date(row[i]) if i < len(row) and row[i] not in (None, "") else None
+                if iso and (latest is None or Date.fromisoformat(iso) > latest):
+                    latest = Date.fromisoformat(iso)
+    return latest.isoformat() if latest else None
+
+
 def _sheet_names(path: Path) -> list[str]:
     from openpyxl import load_workbook
 
@@ -231,6 +257,8 @@ def load_office(path: Path, data_dir: Path) -> SourceDoc:
 
         if is_ooxml(target):
             props = _core_properties(target, kind)
+            if kind == "xlsx":
+                props["as_of"] = _sheet_as_of(target)
             content, pages = docling_markdown(target, kind)
             content = html.unescape(content)
             fmt = "ooxml"
@@ -251,9 +279,19 @@ def load_office(path: Path, data_dir: Path) -> SourceDoc:
         authors, people_source = parse_byline(m.group("value")), "body"
     reviewers = parse_byline(m.group("value")) if (m := _REVIEWER_RE.search(head)) else {}
 
-    date = parse_date(props.get("created"))
+    created = props.get("created")
+    trusted_created = (
+        isinstance(created, datetime)
+        and created.replace(tzinfo=None, microsecond=0) not in _TEMPLATE_TIMESTAMPS
+        and author.lower() not in _GENERIC_AUTHORS  # written by a library: it's generation time
+    )
+    date = parse_date(created) if trusted_created else None
+    date_basis = "core_properties" if date else None
     if m := _DATE_RE.search(content[:4000]):
-        date = parse_date(m.group("value")) or date  # an explicit date in the body wins
+        if body_date := parse_date(m.group("value")):  # an explicit date in the body wins
+            date, date_basis = body_date, "body"
+    if not date and (as_of := props.get("as_of")):
+        date, date_basis = as_of, "latest_row_date"
 
     title = (props.get("title") or "").strip()
     if title.lower() in _GENERIC_TITLES:
@@ -261,7 +299,7 @@ def load_office(path: Path, data_dir: Path) -> SourceDoc:
     if not title and (m := _TITLE_RE.search(head)):
         title = re.sub(r"[*_`]", "", m.group("value")).strip()
     title = title or _title_from(content, path.stem)
-    extra = {"format": fmt, "pages": pages, "warnings": warnings}
+    extra = {"format": fmt, "pages": pages, "warnings": warnings, "date_basis": date_basis}
     if roles := {n: r for n, r in authors.items() if r}:
         extra["author_roles"] = roles
     if reviewers:
