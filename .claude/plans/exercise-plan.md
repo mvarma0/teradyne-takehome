@@ -1,5 +1,7 @@
 # Plan: FastChip Knowledge RAG System (Teradyne take-home)
 
+> **Snapshot:** the initial plan from plan mode, before `data/` existed, kept as written at the time. It is superseded by [`CLAUDE.md`](../../CLAUDE.md), [`TECH.md`](../../TECH.md) and [`TASKS.md`](../../TASKS.md). Later decisions changed parts of it: fake test models were rejected (tests use real local Ollama), the backend was flattened into one module per concern, and the dataset centres on Volta-7 rather than Eagle-5/Falcon-7.
+
 ## Context
 The repo is empty apart from `take-home-assignment.md`, and `data/` doesn't exist yet (the user will add it). The goal is a RAG system for the fictional FastChip Semiconductor. It has three parts:
 - **Ex1:** ingest meeting transcripts, enrich them, and query them through an API.

@@ -8,19 +8,20 @@ This project was built with Claude Code as a pair programmer: I directed the wor
 - [`.claude/plans/`](../.claude/plans/): the plans produced in plan mode (the initial exercise plan and the GitHub check-in plan)
 
 ## 1. Planning
-- Started from the brief in `take-home-assignment.md`. Asked Claude for a plan first, in plan mode, then a full `CLAUDE.md` and a numbered task list where every task has Input / Files / Accept / **Verify**, plus runnable checkpoints after each exercise.
+- Started from the PDF brief (`docs/Teradyne_FDE_Take-Home_Exercises.pdf`). I wrote my own working spec on top of it (`take-home-assignment.md`: the invented company, stack and initial API). Asked Claude for a plan first, in plan mode, then a full `CLAUDE.md` and a numbered task list where every task has Input / Files / Accept / **Verify**, plus runnable checkpoints after each exercise.
 - Decisions recorded up front: OpenAI or local models, configurable per component; routing "send" is log-only; metadata enrichment uses LLM structured output; people fields (attendees, authors) come only from source parsing, never from the LLM.
 
 ## 2. Exercise 1: ingestion, enrichment, query API
 - **Parsing:** docling for parsing, LangChain for orchestration, ChromaDB for vectors, SQLite for structured data.
 - **Chunking:** I rejected fixed 1000-character chunking. Claude replaced it with structure-aware recursive chunking: split on headings, merge small sections, and recursively split only oversized ones by paragraph / speaker turn / sentence within a token budget.
-- **Models:** I rejected fake test models. Providers are OpenAI (`gpt-4o-mini`, `text-embedding-3-small`) or local Ollama (`qwen2.5:7b`, `nomic-embed-text`), and tests run against real local models.
+- **Models:** I rejected fake test models. Providers started as OpenAI (`gpt-4o-mini`, `text-embedding-3-small`) or local Ollama (`qwen2.5:7b`, `nomic-embed-text`); later any LangChain provider became configurable per component (Gemini included). Tests run against real local models.
 - **Retrieval:** semantic + BM25, merged with weighted reciprocal rank fusion, then LLM reranking.
 - **Reranking:** Claude's verification caught that the first reranker, which scored all passages in one call, misaligned scores on the 7B model; it ranked an Eagle-5 passage top for a Falcon-7 question. It was switched to scoring each passage separately, with a one-sentence reason before each score.
 - **Filters:** after I asked whether metadata filtering happened before retrieval, person and date filters were changed from post-filters to true pre-filters (doc ids resolved in SQLite, then pushed into Chroma, with BM25 limited to the same set).
 
 ## 3. Exercise 2: Office documents, traceability, routing, gaps
 - **Office loader:** a docling-based loader for docx/pptx/xlsx, with one section per slide or sheet so citations carry a location. Authors, reviewers and roles are read from document properties or "Author: Name, Role" bylines.
+- **Dataset origin:** I generated the dataset outside this workspace and committed it to `data/`; later changes to it are listed in `CLAUDE.md`.
 - **Data finding:** Claude found the dataset's `.pptx` files were plain text, byte-identical to their `_slides.md` copies, and the `.docx` files were bare packages with literal markdown. At my request they were rebuilt into properly formatted Office files, which I verified open in Microsoft Office. The one-off conversion script was then deleted.
 - **Business rules:** priority floors for line-down / safety / escalation language; action-item owners and products must appear in the source; uncited claims are dropped; the newest source wins on conflict.
 - **Answers:** a streamed answer is validated after generation. Citations are re-attached or removed, uncited statements are dropped, and a confidence score is computed.
@@ -42,6 +43,7 @@ This project was built with Claude Code as a pair programmer: I directed the wor
 - In `TASKS.md`, only update statuses and add notes; never rewrite tasks. (Claude once replaced sections wholesale; the file was restored from git and only statuses were changed.)
 - Don't read the dataset unless asked, and keep test fixtures minimal.
 - Run checks read-only and confirm before changing anything outside the code (configuration, data, memory).
+- **Install size (2026-10-06):** checking why `uv sync` was ~1.5 GB showed that full docling pulls in PyTorch, OpenCV and OCR models for PDF/image parsing, which this app never uses. Switched to `docling-slim` with only the Markdown and Office extras (~625 MB); all 40 files re-parsed to identical content. The README setup section was rewritten with real system requirements (Node 20.19+ / 22.12+).
 - **Added near the end (2026-10-06):** a `PostToolUse` hook in `.claude/settings.json` that runs `ruff format` and `ruff check --fix` on every backend Python file Claude edits, and returns any remaining lint errors to Claude. Also a project skill, `.claude/skills/verify/SKILL.md`, that packages the Verify steps from `TASKS.md` (lint, unit tests, integration test if Ollama is up, frontend build, plus the golden eval and smoke scripts on request). Earlier, these checks were run by hand.
 
 ## 6. Verification snapshot

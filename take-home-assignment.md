@@ -2,6 +2,8 @@
 
 A retrieval-augmented generation (RAG) knowledge system for a fictional semiconductor company. It is built in three exercises, and each one extends the previous one.
 
+> **What this file is:** my own working spec, written by me on top of the original brief ([PDF](docs/Teradyne_FDE_Take-Home_Exercises.pdf)). It restates the three exercises and adds my choices: the invented company, the technology stack and the initial API. The PDF also sets the workspace, AI-tool and data rules (for example, *"You generate your own dataset"*).
+
 | # | Exercise | Focus | Deliverable |
 |---|---|---|---|
 | 1 | Meeting transcripts | Ingestion, enrichment, query API | Working service, callable via curl or a test script |
@@ -111,12 +113,30 @@ A web application that puts the full system in front of a user:
 
 ## Dataset
 
-The dataset is provided in `data/` and is **read-only**. The system only ingests it and never generates or modifies it.
+The PDF asks candidates to generate their own dataset. I generated it **outside this workspace** and committed it to `data/`. Later changes (Office files rebuilt as real OOXML, contradictions fixed, 4 meetings and a company overview added, dates shifted to 2026) are listed in [`CLAUDE.md`](CLAUDE.md#dataset-in-data-read-only). The application only ingests `data/` and never modifies it, except for files a user uploads through the UI.
 
-### Meeting transcripts: `data/meetings/` (20 × `.md`)
+The data tells one story, January → September 2026: the **Volta-7** automotive EV powertrain controller, from first-silicon yield problems through an HTOL reliability failure, a design fix and customer (NovaDrive Motors) qualification, to production and the FY2027 strategy. The company overview ties it to FastChip's other product lines (Eagle-5, Falcon-7, PowerLine).
 
-| Meetings | Theme |
+### Meeting transcripts: `data/meetings/` (24 × `.md`)
+
+| Period | Themes |
 |---|---|
+| Jan 2026 | Ramp kickoff, first yield data, ATE test program, design-to-PE handoff |
+| Feb 2026 | Metal-layer yield defect, CMP slurry supplier, reliability test plan, NovaDrive sample escalation, test program complete |
+| Mar 2026 | NPI status, HTOL failure review and emergency failure analysis, NovaDrive escalation, Rev B design fix and timeline risk |
+| Apr 2026 | 8D corrective action review, Rev B first yield, reliability retest pass |
+| May–Jun 2026 | NovaDrive audit prep and pass, lessons-learned retro, production ramp and supply, final 1000-hour HTOL readout |
+| Sep 2026 | Annual strategy and Volta-8 roadmap |
+
+### Office documents: `data/documents/` (16 files)
+
+| Folder | Documents |
+|---|---|
+| `docx/` (6) | Corrective action 8D · Failure analysis (HTOL) · FastChip company overview · NPI checklist (Volta-7) · PE division SOP · Yield improvement report Q1 |
+| `pptx/` (5) | NovaDrive audit readout · Quarterly PE review Q1 · Reliability qualification summary · Test coverage review · Volta-7 ramp status |
+| `xlsx/` (5) | Action item tracker · Defect Pareto log · Reliability test matrix · Test time breakdown · Yield tracker |
+
+---|---|
 | 1-4 | Eagle-5 yield issues |
 | 5-8 | Falcon-7 design reviews |
 | 9-11 | Supply chain and vendor discussions |

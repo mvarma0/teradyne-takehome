@@ -1,5 +1,7 @@
 # Plan: Push the workspace to GitHub
 
+> **Snapshot:** the plan for the first push to GitHub, kept as written at the time. It is superseded by [`CLAUDE.md`](../../CLAUDE.md), [`TECH.md`](../../TECH.md) and [`TASKS.md`](../../TASKS.md). Work later moved to the `feature/configurable-llm-providers` branch.
+
 ## Context
 The user wants the whole workspace checked in to GitHub for sharing. Nothing gets pushed until they explicitly confirm.
 

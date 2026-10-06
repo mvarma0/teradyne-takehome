@@ -178,6 +178,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Verify: `uv run python -m eval.run_eval` prints the report; hit@5 ≥ 0.8
   - Status: In progress: `eval/golden.jsonl` (11 questions from one docx + 3 controls), runner in `app/evals/` (`uv run python -m app.evals`), synthetic generator. Synthetic run verified on demo data. Still open: the golden run on real data and threshold calibration.
   - Status (T3 run): **Pending:** extend the golden set across meetings/docx/pptx/xlsx, run it on real data, calibrate `CONFIDENCE_THRESHOLD`. Note: the Gemini free tier allows 15 requests/min per model (`LLM_MAX_RPM=14`), so a question takes about a minute.
+  - Status (2026-10-06): F9 ran the golden eval on real data with Gemini (hit rate 1.0, faithfulness 1.0, relevance 1.0). Still open: extend the set beyond one docx, re-run it on the 40-file dataset, and calibrate `CONFIDENCE_THRESHOLD`.
 
 - [x] **2.15 Ex2 smoke** ✅ CHECKPOINT
   - Files: `scripts/smoke_ex2.sh`
@@ -307,6 +308,17 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Verify: `uv run pytest -m "not integration"`; "What does FastChip do?" cites `fastchip_company_overview.docx`; golden eval faithfulness ≥ 0.7
   - Status: Done: 15 modules, 41 unit tests, 29 API paths, smoke Ex1 9/9 and Ex2 12/12 on Gemini; golden eval faithfulness 1.0 (20/20 claims), hit rate 1.0, relevance 1.0. Answers that admit missing information are now capped at 0.45 so they route.
 
+- [x] **F10 Workspace and setup polish** (requested 2026-10-06)
+  - Files: `backend/pyproject.toml`, `backend/uv.lock`, `README.md`, `docs/MEASUREMENT.md`, `.claude/settings.json`, `.claude/skills/verify/SKILL.md`, `take-home-assignment.md`, `CLAUDE.md`, docs and memory
+  - Accept:
+    - Backend installs without PyTorch: `docling` → `docling-slim[convert-core,format-office,format-markdown]` (only Markdown/DOCX/PPTX/XLSX are parsed)
+    - README lists the real system requirements (Python 3.12+, uv, **Node 20.19+ / 22.12+**, disk) and treats all providers equally, using tables and short steps
+    - `MEASUREMENT.md` states one metric with a formula, a target and a check against missing feedback, in one paragraph
+    - A ruff `PostToolUse` hook and a `/verify` skill package the Verify steps
+    - Docs agree with the code and data: no stale module paths or 2024 dates, `take-home-assignment.md` labelled as the working spec over the PDF brief, dataset origin (generated outside this workspace) stated
+  - Verify: `/verify` (lint, unit, Ollama integration, frontend build); re-parse all 40 files with docling-slim and compare with the stored content
+  - Status: Done: backend install 1.5 GB → 625 MB; all 40 files parse to identical content; lint, 50 unit tests and the Ollama integration test pass; the hook was shown to reformat an edited file.
+
 ---
 
 ## Backlog
@@ -347,3 +359,8 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
 5. No auth: `submitted_by`/reviewer are free text.
 6. Pinned Python 3.12 (the system has 3.13) for chromadb wheel safety.
 7. `OPENAI_API_KEY` needed for real ingestion, querying and eval; tests run offline.
+
+Status of the flags (2026-10-06):
+- 1: resolved. The dataset is final (24 meetings + 16 documents); `fastchip_company_overview.docx` ties Volta-7 to the brief's company, and routing uses the people parsed from the data.
+- 3: resolved. Core properties (author, title, date) are populated in all Office files and parsed by the loader.
+- 7: superseded. Any LangChain provider works (OpenAI, Gemini, Ollama, …); tests run against real local Ollama, not offline fakes.

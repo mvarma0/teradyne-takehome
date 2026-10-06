@@ -4,7 +4,7 @@
 from the re-review and T1 from the third pass. Each fix has a regression test, and `pytest -m "not
 integration"` passes (50 tests). The Ex2 smoke suite (12 checks) passes against the live server after the T1 fix.
 
-Scope: committed range `main...HEAD` plus the uncommitted working-tree refactor (the `app/*` packages
+Scope: committed range `main...HEAD` plus the working-tree refactor (since committed as `9cc7301`) (the `app/*` packages
 collapsed into flat modules: `answer.py`, `api.py`, `db.py`, `ingest.py`, `loaders.py`, `search.py`, ...).
 
 Checks run:

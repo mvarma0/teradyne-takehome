@@ -68,40 +68,80 @@
 
 ## 🚀 Quick start
 
-### Prerequisites
-- Python 3.12 and [uv](https://docs.astral.sh/uv/)
-- Node.js 18+
-- One model provider: an OpenAI or Gemini API key, **or** [Ollama](https://ollama.com) running locally (free)
+### System requirements
 
-### 1. Configure
+| Requirement | Version | Check with | Notes |
+|---|---|---|---|
+| **Python** | 3.12+ | `python3 --version` | `uv` can install it for you (`uv python install 3.12`) |
+| **uv** | any recent | `uv --version` | Python package manager: [install](https://docs.astral.sh/uv/getting-started/installation/) |
+| **Node.js** | **20.19+ or 22.12+** | `node -v` | Required by Vite 8. Node 18 will not work |
+| **npm** | comes with Node | `npm -v` | |
+| **Disk** | ~1 GB free | | Backend packages ~625 MB, frontend ~215 MB |
+| **OS** | macOS, Linux, or Windows (WSL / Git Bash) | | `dev.sh` is a bash script; see the Windows note below |
+| LibreOffice | *optional* | `soffice --version` | Only for legacy `.doc/.ppt/.xls` files. The included data doesn't need it |
 
+### Choose a model provider
+
+You need **one** provider. Any LangChain provider works; these three are ready to use:
+
+| Provider | Cost | What you need | Preset in `.env` |
+|---|---|---|---|
+| **OpenAI** | Paid | `OPENAI_API_KEY` | **A** (on by default) |
+| **Ollama** | Free, runs locally | [Ollama](https://ollama.com) installed + ~5 GB for models | **B** |
+| **Google Gemini** | Free tier available | `GOOGLE_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) | **C** |
+| Others (Anthropic, Groq, Mistral…) | Varies | `uv add langchain-<provider>` + that provider's key | Set `LLM_PROVIDER` / `LLM_MODEL` |
+
+### Setup (5 steps)
+
+**1. Install the backend**
 ```bash
 cd backend
-uv sync
+uv sync                      # installs Python packages (~625 MB)
 cp .env.example .env
 ```
 
-Open `backend/.env` and keep **one** preset uncommented: A (OpenAI, add `OPENAI_API_KEY`), B (Ollama, no key) or C (Gemini, add `GOOGLE_API_KEY`). Nothing else is required. For Ollama, first run `ollama pull qwen2.5:7b && ollama pull nomic-embed-text`.
+**2. Configure your model** in `backend/.env`:
+- Keep **one** preset (A, B or C) uncommented and **comment out the others**.
+- Fill in that preset's API key (Ollama needs none).
+- Using Ollama? Download the models first: `ollama pull qwen2.5:7b && ollama pull nomic-embed-text`
+- Everything else has a working default. No other settings are required.
 
-### 2. Install the frontend
-
+**3. Install the frontend**
 ```bash
 cd ../frontend
 npm install
 ```
 
-### 3. Run
-
+**4. Start the app** (from the repo root)
 ```bash
 cd ..
-./dev.sh            # backend on :8000 and frontend on :5173
+./dev.sh                     # backend on :8000, frontend on :5173 (Ctrl+C stops both)
 ```
 
-### 4. Load the data and ask
+**5. Load the data and ask**
+- Open **http://localhost:5173**
+- Go to **Documents** → click **Ingest changes**. The first ingest enriches all 40 files with the LLM. It takes a few minutes with a hosted API and longer on Ollama.
+- Go to **Ask** and try: *"Why did the Volta-7 Rev A fail HTOL, and what was the fix?"* 🎉
 
-Open **http://localhost:5173** → **Documents** → **Ingest changes** (or `curl -X POST localhost:8000/api/ingest`), then ask a question on **Ask**. 🎉
+### Useful links once it's running
 
-API docs (Swagger): http://localhost:8000/docs
+| What | URL |
+|---|---|
+| App | http://localhost:5173 |
+| API docs (Swagger) | http://localhost:8000/docs |
+| Health check | http://localhost:8000/api/health |
+
+### Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `npm install` / `npm run dev` fails with an engine or syntax error | Upgrade Node to 20.19+ or 22.12+ |
+| Ask returns nothing | Run the ingest first (step 5) |
+| Model or "provider unreachable" errors | Check that exactly one preset is active in `.env` and its key is set; for Ollama, make sure `ollama serve` is running |
+| `.env` changes have no effect | Restart `./dev.sh` |
+| Windows without bash | Run the two servers in separate terminals: `cd backend && uv run uvicorn app.main:app --port 8000` and `cd frontend && npm run dev` |
+
+More settings and fixes: [`backend/README.md`](backend/README.md).
 
 ---
 
@@ -186,6 +226,6 @@ cd ../frontend && npm run build                       # type-check + build
 | [`backend/README.md`](backend/README.md) | Providers, every setting, ingestion, every endpoint, troubleshooting |
 | [`frontend/README.md`](frontend/README.md) | Frontend pages, structure and streaming |
 | [`docs/MEASUREMENT.md`](docs/MEASUREMENT.md) | The 30-day measurement approach |
-| [`take-home-assignment.md`](take-home-assignment.md) | The original brief ([PDF](docs/Teradyne_FDE_Take-Home_Exercises.pdf)) |
+| [`take-home-assignment.md`](take-home-assignment.md) | My working spec, written on top of the original brief ([PDF](docs/Teradyne_FDE_Take-Home_Exercises.pdf)) |
 | [`TASKS.md`](TASKS.md) · [`CLAUDE.md`](CLAUDE.md) | Execution plan with per-task verification; architecture and rules |
 | [`docs/AI_SESSION_LOG.md`](docs/AI_SESSION_LOG.md) | How it was built with [Claude Code](https://claude.com/claude-code), the primary AI tool |

@@ -5,7 +5,7 @@ description = "FastChip Semiconductor RAG knowledge system"
 requires-python = ">=3.12"
 dependencies = [
     "chromadb>=1.5.9",
-    "docling>=2.133.0",
+    "docling-slim[convert-core,format-office,format-markdown]>=2.133.0",
     "fastapi>=0.142.2",
     "langchain>=1.4.3",
     "langchain-chroma>=1.1.0",
