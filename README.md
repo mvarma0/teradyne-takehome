@@ -146,6 +146,22 @@ More settings and fixes: [`backend/README.md`](backend/README.md).
 
 ---
 
+## 🐳 Run with Docker (optional)
+
+One container serves the API and the built React app. Only Docker is needed; no Python or Node.
+
+```bash
+cp backend/.env.example backend/.env      # pick a preset and add its key (step 2 above)
+docker build -t fastchip .
+docker run -p 8000:8000 -v "$PWD/backend/.env:/app/backend/.env:ro" fastchip
+```
+
+- Open **http://localhost:8000**. With the Gemini preset the index is ready immediately (copied from `backend/seed/`); with another provider, run **Documents → Ingest changes** once.
+- Mount `.env` as shown rather than `--env-file`: Docker's `--env-file` keeps inline `# comments` as part of the value.
+- Container data (chats, feedback, uploads) is lost when the container is removed.
+
+---
+
 ## 🖥️ Using the app
 
 | Page | What it's for |

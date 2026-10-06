@@ -325,6 +325,12 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Verify: `uv run pytest tests/test_seed.py`; start the server on empty storage → `/api/stats` shows 40 documents and 176 chunks, `POST /api/ingest` reports 40 unchanged, retrieval returns the HTOL sources
   - Status: Done: seed is 7.5 MB (Gemini collection only); 53 unit tests pass; the seeded server passed all three checks.
 
+- [x] **F12 Docker image and Render blueprint** (requested 2026-10-07)
+  - Files: `backend/app/main.py` (`mount_frontend()`), `backend/app/config.py` (`FRONTEND_DIST`), `backend/tests/test_frontend_serving.py`, `Dockerfile`, `.dockerignore`, `render.yaml`, `README.md` (Run with Docker)
+  - Accept: one container serves API + UI on `$PORT` as a non-root user; no secrets or local storage in the image; starts from the seed index; fits Render's free tier (512 MB); local `./dev.sh` unchanged
+  - Verify: `uv run pytest -m "not integration"`; `docker build`; `docker run -m 512m` → `/`, `/review` and `/api/stats` (40 documents, 176 chunks); `smoke_ex1.sh` + `smoke_ex2.sh` against the container
+  - Status: Done: 57 unit tests pass; container ready in ~2 s, 130 MB idle and 262 MB peak; both smoke suites pass. Found along the way: a Gemini free-tier 429 (rate limit) surfaces as HTTP 500; the re-run passed once the per-minute quota reset. Docker's `--env-file` keeps inline `# comments`, so the README mounts `.env` instead.
+
 ---
 
 ## Backlog

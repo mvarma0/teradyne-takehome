@@ -44,6 +44,7 @@ This project was built with Claude Code as a pair programmer: I directed the wor
 - Don't read the dataset unless asked, and keep test fixtures minimal.
 - Run checks read-only and confirm before changing anything outside the code (configuration, data, memory).
 - **Install size (2026-10-06):** checking why `uv sync` was ~1.5 GB showed that full docling pulls in PyTorch, OpenCV and OCR models for PDF/image parsing, which this app never uses. Switched to `docling-slim` with only the Markdown and Office extras (~625 MB); all 40 files re-parsed to identical content. The README setup section was rewritten with real system requirements (Node 20.19+ / 22.12+).
+- **Deployment (2026-10-07):** Hugging Face Docker Spaces now need a paid plan, so the target became Render's free tier (512 MB, no card). The slim install made it fit: the container peaks at about 260 MB. The image serves API and UI from one origin and starts from a committed, chat-free seed index (`backend/seed/`), so no API key is needed at build time.
 - **Added near the end (2026-10-06):** a `PostToolUse` hook in `.claude/settings.json` that runs `ruff format` and `ruff check --fix` on every backend Python file Claude edits, and returns any remaining lint errors to Claude. Also a project skill, `.claude/skills/verify/SKILL.md`, that packages the Verify steps from `TASKS.md` (lint, unit tests, integration test if Ollama is up, frontend build, plus the golden eval and smoke scripts on request). Earlier, these checks were run by hand.
 
 ## 6. Verification snapshot
