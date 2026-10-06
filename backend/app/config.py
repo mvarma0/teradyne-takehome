@@ -78,11 +78,12 @@ class Settings(BaseSettings):
     chroma_dir: Path = BACKEND_DIR / "storage" / "chroma"
     chroma_collection: str = "fastchip"
     sqlite_path: Path = BACKEND_DIR / "storage" / "app.db"
+    seed_dir: Path = BACKEND_DIR / "seed"  # pre-built index copied into empty storage on startup
 
     # API
     cors_origins: str = "http://localhost:5173"
 
-    @field_validator("data_dir", "chroma_dir", "sqlite_path")
+    @field_validator("data_dir", "chroma_dir", "sqlite_path", "seed_dir")
     @classmethod
     def _resolve_relative_to_backend(cls, v: Path) -> Path:
         return v if v.is_absolute() else (BACKEND_DIR / v).resolve()

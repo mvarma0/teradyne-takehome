@@ -22,6 +22,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "DATA_DIR": str(data_dir),
         "CHROMA_DIR": str(tmp_path / "chroma"),
         "SQLITE_PATH": str(tmp_path / "app.db"),
+        "SEED_DIR": str(tmp_path / "no-seed"),
         "USE_DOCLING": "false",
         "LLM_PROVIDER": "ollama",
         "LLM_MODEL": OLLAMA_LLM,

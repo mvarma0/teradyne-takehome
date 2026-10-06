@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import logging
+import shutil
 from contextlib import asynccontextmanager
 
 import httpx
@@ -25,6 +26,25 @@ def reset_all() -> None:
     invalidate_bm25()
 
 
+# ---- seed ---------------------------------------------------------------------------------
+# A fresh checkout (or container) starts from the committed, chat-free index in backend/seed/
+# instead of re-ingesting data/. Only copied when storage is empty, so local data is never
+# overwritten. The seed holds one Chroma collection per embedding model; other models re-ingest.
+
+
+def seed_storage() -> bool:
+    s = get_settings()
+    seed_db, seed_chroma = s.seed_dir / "app.db", s.seed_dir / "chroma"
+    if s.sqlite_path.exists() or s.chroma_dir.exists() or not seed_db.exists():
+        return False
+    s.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(seed_db, s.sqlite_path)
+    if seed_chroma.is_dir():
+        shutil.copytree(seed_chroma, s.chroma_dir)
+    logging.getLogger(__name__).info("seeded storage from %s", s.seed_dir)
+    return True
+
+
 # ---- main ---------------------------------------------------------------------------------
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -32,6 +52,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    seed_storage()
     init_db()
     yield
 
