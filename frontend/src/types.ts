@@ -285,3 +285,35 @@ export interface DocumentContent {
   content: string | null
   chunks: { chunk_id: string; chunk_index: number; section: string | null; text: string }[]
 }
+
+export interface TraceSummary {
+  id: string
+  conversation_id: string | null
+  query_text: string
+  standalone_query: string | null
+  status: AnswerStatus
+  confidence: number | null
+  feedback: 'up' | 'down' | null
+  created_at: string
+  n_gaps: number
+  n_retrieved: number
+  n_cited: number
+  cited_files: string[]
+  guardrail: Guardrails['category'] | null
+  latency_ms: number | null
+}
+
+export type TraceGap = Omit<Gap, 'conversation_id' | 'confidence' | 'routing' | 'citations'>
+
+export interface Trace extends Omit<AnswerPayload, 'routing'> {
+  id: string
+  created_at: string
+  routing: Routing[]
+  gaps: TraceGap[]
+}
+
+export interface UploadResult {
+  source_file: string
+  replaced: boolean
+  report: Record<string, unknown>
+}

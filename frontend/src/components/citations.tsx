@@ -1,74 +1,163 @@
-import { Download, ExternalLink, Users, X } from 'lucide-react'
+import { ChevronDown, Download, ExternalLink, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import ReactMarkdown from 'react-markdown'
 import { Link } from 'react-router-dom'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api/client'
-import { fileName, humanize } from '../lib/format'
+import { displayTitle, fileName, peopleLabel } from '../lib/format'
 import type { Citation, DocumentContent } from '../types'
 import { MetaBadges, SourceIcon } from './meta'
 import { Badge, cn, Spinner } from './ui'
 
-/** Inline [n] chip. Hover shows the source card; click opens the document at the chunk. */
-export function CitationChip({ citation, n, onOpen }: {
+type Hover = (n: number | null) => void
+
+/** Inline [n] marker. Hover/focus lights up the matching evidence entry; click opens the passage. */
+export function CitationChip({ citation, n, onOpen, active, onHover }: {
   citation?: Citation
   n: number
   onOpen?: (c: Citation) => void
+  active?: boolean
+  onHover?: Hover
 }) {
-  const ref = useRef<HTMLButtonElement>(null)
-  const [pos, setPos] = useState<{ x: number; y: number; above: boolean } | null>(null)
-  const timer = useRef<number | undefined>(undefined)
-
-  if (!citation) {
-    return <sup className="text-[10px] text-slate-400">[{n}]</sup>
-  }
-  const show = () => {
-    window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => {
-      const r = ref.current?.getBoundingClientRect()
-      if (r) setPos({ x: r.left + r.width / 2, y: r.top < 260 ? r.bottom : r.top, above: r.top >= 260 })
-    }, 120)
-  }
-  const hide = () => {
-    window.clearTimeout(timer.current)
-    timer.current = window.setTimeout(() => setPos(null), 150)
-  }
+  if (!citation) return <sup className="text-[10px] text-slate-400">[{n}]</sup>
+  const who = citation.people.join(', ') || 'not recorded'
   return (
-    <>
-      <button
-        ref={ref}
-        type="button"
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onFocus={show}
-        onBlur={hide}
-        onClick={() => onOpen?.(citation)}
-        className="mx-0.5 inline-flex h-[18px] min-w-[18px] translate-y-[-1px] items-center justify-center rounded-md bg-brand-50 px-1 align-middle text-[10px] font-semibold text-brand-700 ring-1 ring-brand-100 transition hover:bg-brand-600 hover:text-white dark:bg-brand-700/30 dark:text-brand-100 dark:ring-brand-700/50"
-        aria-label={`Source ${n}: ${fileName(citation.source_file)}`}
-      >
-        {n}
-      </button>
-      {pos &&
-        createPortal(
-          <div
-            onMouseEnter={() => window.clearTimeout(timer.current)}
-            onMouseLeave={hide}
-            style={{
-              left: Math.min(Math.max(pos.x, 180), window.innerWidth - 180),
-              top: pos.y,
-              transform: `translate(-50%, ${pos.above ? 'calc(-100% - 8px)' : '8px'})`,
-            }}
-            className="fixed z-[60] w-[340px] rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl dark:border-slate-700 dark:bg-slate-900"
-          >
-            <SourceCard citation={citation} onOpen={onOpen} compact />
-          </div>,
-          document.body,
-        )}
-    </>
+    <button
+      type="button"
+      onMouseEnter={() => onHover?.(n)}
+      onMouseLeave={() => onHover?.(null)}
+      onFocus={() => onHover?.(n)}
+      onBlur={() => onHover?.(null)}
+      onClick={() => onOpen?.(citation)}
+      className={cn(
+        'mx-0.5 inline-flex h-[18px] min-w-[18px] translate-y-[-1px] items-center justify-center rounded-[4px] px-1 align-middle font-mono text-[10.5px] font-medium ring-1 transition-colors',
+        active
+          ? 'cite-active'
+          : 'bg-brand-50 text-brand-700 ring-brand-200 hover:bg-brand-100 dark:bg-brand-900/60 dark:text-brand-100 dark:ring-brand-700',
+      )}
+      aria-label={`Source ${n}: ${fileName(citation.source_file)}, ${peopleLabel(citation.source_type, citation.people.length)} ${who}`}
+    >
+      {n}
+    </button>
   )
 }
 
+/**
+ * The evidence rail: every cited source with its file, people and date, always visible.
+ * Entries are linked to the inline markers through the shared `active` number.
+ */
+export function EvidenceRail({ citations, cited, active, onHover, onOpen }: {
+  citations: Citation[]
+  cited: Set<number>
+  active: number | null
+  onHover: Hover
+  onOpen: (c: Citation) => void
+}) {
+  const [showAll, setShowAll] = useState(false)
+  const used = cited.size ? citations.filter((c) => cited.has(c.n)) : citations
+  const unused = cited.size ? citations.filter((c) => !cited.has(c.n)) : []
+  const docs = new Set(used.map((c) => c.doc_id)).size
+  const heading = cited.size ? 'Sources' : 'Closest matches'
+  return (
+    <aside aria-label={heading}>
+      <div className="mb-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <h3 className="text-sm font-semibold">{heading}</h3>
+          <span className="text-xs text-slate-500">
+            {used.length} passage{used.length === 1 ? '' : 's'} from {docs} file{docs === 1 ? '' : 's'}
+          </span>
+        </div>
+        {!cited.size && <p className="mt-0.5 text-xs text-slate-500">Retrieved, but not enough to answer from.</p>}
+      </div>
+      <ol className="space-y-1.5">
+        {used.map((c) => (
+          <EvidenceItem key={c.chunk_id} c={c} active={active === c.n} onHover={onHover} onOpen={onOpen} />
+        ))}
+      </ol>
+      {unused.length > 0 && (
+        <div className="mt-2">
+          <button
+            onClick={() => setShowAll((s) => !s)}
+            className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+          >
+            <ChevronDown className={cn('size-3.5 transition-transform', showAll && 'rotate-180')} />
+            {showAll ? 'Hide' : 'Show'} {unused.length} retrieved but not cited
+          </button>
+          {showAll && (
+            <ol className="mt-1.5 space-y-1.5 opacity-80">
+              {unused.map((c) => (
+                <EvidenceItem key={c.chunk_id} c={c} active={active === c.n} onHover={onHover} onOpen={onOpen} />
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </aside>
+  )
+}
+
+function EvidenceItem({ c, active, onHover, onOpen }: {
+  c: Citation
+  active: boolean
+  onHover: Hover
+  onOpen: (c: Citation) => void
+}) {
+  const ref = useRef<HTMLLIElement>(null)
+  useEffect(() => {
+    if (active) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [active])
+  return (
+    <li ref={ref}>
+      <button
+        type="button"
+        onMouseEnter={() => onHover(c.n)}
+        onMouseLeave={() => onHover(null)}
+        onFocus={() => onHover(c.n)}
+        onBlur={() => onHover(null)}
+        onClick={() => onOpen(c)}
+        className={cn(
+          'group w-full rounded-md border px-3 py-2.5 text-left transition-colors',
+          active
+            ? 'border-brand-200 bg-brand-50 dark:border-brand-700 dark:bg-brand-900/40'
+            : 'border-slate-200/90 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-[#121a1d] dark:hover:border-slate-700',
+        )}
+      >
+        <div className="flex items-start gap-2.5">
+          <span
+            className={cn(
+              'mt-px flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-[4px] px-1 font-mono text-[10.5px] font-medium ring-1',
+              active ? 'cite-active' : 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-900/60 dark:text-brand-100 dark:ring-brand-700',
+            )}
+          >
+            {c.n}
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="line-clamp-2 text-[13px] leading-snug font-medium">{displayTitle(c.title, fileName(c.source_file))}</p>
+            <p className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+              <SourceIcon type={c.source_type} className="size-3.5 shrink-0" />
+              <span className="truncate font-mono text-[11px]">{fileName(c.source_file)}</span>
+            </p>
+            <p className="text-xs text-slate-700 dark:text-slate-300">
+              <span className="text-slate-500 dark:text-slate-400">{peopleLabel(c.source_type, c.people.length)} </span>
+              {c.people.length ? c.people.join(', ') : <span className="text-slate-400">not recorded</span>}
+            </p>
+            <p className="flex flex-wrap gap-x-3 text-[11px] text-slate-500 dark:text-slate-400">
+              {c.date && <span className="tabular-nums">{c.date}</span>}
+              {c.section && <span className="truncate">{sectionLabel(c.section)}</span>}
+            </p>
+            {active && (
+              <p className="line-clamp-4 border-l-2 border-brand-200 pl-2 text-xs leading-relaxed text-slate-600 dark:border-brand-700 dark:text-slate-300">
+                {plainSnippet(c.snippet)}
+              </p>
+            )}
+          </div>
+        </div>
+      </button>
+    </li>
+  )
+}
+
+/** Full source card (review queue): title, file, people, date, metadata and the passage. */
 export function SourceCard({ citation: c, onOpen, compact }: {
   citation: Citation
   onOpen?: (c: Citation) => void
@@ -80,28 +169,26 @@ export function SourceCard({ citation: c, onOpen, compact }: {
         <SourceIcon type={c.source_type} className="mt-0.5 size-4 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium" title={c.title ?? ''}>
-            {c.title ?? fileName(c.source_file)}
+            {displayTitle(c.title, fileName(c.source_file))}
           </p>
           <p className="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400" title={c.source_file}>
             {c.source_file}
           </p>
         </div>
-        <Badge tone="brand">[{c.n}]</Badge>
+        <Badge tone="brand">{c.n}</Badge>
       </div>
-      <div className="flex items-start gap-1.5 text-xs text-slate-600 dark:text-slate-300">
-        <Users className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
-        <span>
-          <span className="font-medium">{c.people_label}:</span> {c.people.join(', ') || 'unknown'}
-        </span>
-      </div>
-      <div className="flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
+      <p className="text-xs text-slate-700 dark:text-slate-300">
+        <span className="text-slate-500">{peopleLabel(c.source_type, c.people.length)} </span>
+        {c.people.join(', ') || 'not recorded'}
+      </p>
+      <p className="flex flex-wrap gap-x-3 text-[11px] text-slate-500">
         {c.date && <span>{c.date}</span>}
-        {c.section && <span className="truncate">· {c.section}</span>}
-      </div>
+        {c.section && <span className="truncate">{sectionLabel(c.section)}</span>}
+      </p>
       <MetaBadges topic={c.topic_domain} priority={c.priority} products={c.products} />
       <p
         className={cn(
-          'rounded-lg bg-slate-50 p-2 text-xs leading-relaxed whitespace-pre-line text-slate-600 dark:bg-slate-800/60 dark:text-slate-300',
+          'rounded-md bg-slate-50 p-2 text-xs leading-relaxed whitespace-pre-line text-slate-600 dark:bg-slate-800/60 dark:text-slate-300',
           compact ? 'line-clamp-5' : 'line-clamp-[10]',
         )}
       >
@@ -110,7 +197,7 @@ export function SourceCard({ citation: c, onOpen, compact }: {
       {onOpen && (
         <button
           onClick={() => onOpen(c)}
-          className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-100"
+          className="flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline dark:text-brand-200"
         >
           Open in document <ExternalLink className="size-3" />
         </button>
@@ -118,6 +205,13 @@ export function SourceCard({ citation: c, onOpen, compact }: {
     </div>
   )
 }
+
+/** Section path ("A > B") with all-caps banners in title case. */
+const sectionLabel = (path: string) =>
+  path
+    .split(' > ')
+    .map((p) => displayTitle(p))
+    .join(' › ')
 
 const plainSnippet = (s: string) =>
   s
@@ -129,19 +223,21 @@ const plainSnippet = (s: string) =>
 
 const CITE = /\[(\d+)\]/g
 
-/** Markdown answer with [n] markers rendered as citation chips. */
-export function AnswerMarkdown({ text, citations, onOpen, streaming }: {
+/** Markdown answer with [n] markers rendered as citation markers linked to the evidence rail. */
+export function AnswerMarkdown({ text, citations, onOpen, streaming, active, onHover }: {
   text: string
   citations: Citation[]
   onOpen?: (c: Citation) => void
   streaming?: boolean
+  active?: number | null
+  onHover?: Hover
 }) {
   const byN = new Map(citations.map((c) => [c.n, c]))
   const md = text.replace(CITE, (_, n) => `[${n}](#cite-${n})`)
   return (
     <div
       className={cn(
-        'prose prose-sm max-w-none prose-slate dark:prose-invert prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-headings:mt-3 prose-headings:mb-1.5',
+        'prose max-w-none text-[15px] leading-7 prose-slate dark:prose-invert prose-p:my-2 prose-ul:my-2 prose-li:my-1 prose-headings:mt-4 prose-headings:mb-1.5 prose-headings:text-base prose-strong:font-semibold',
         streaming && 'streaming-caret',
       )}
     >
@@ -150,7 +246,10 @@ export function AnswerMarkdown({ text, citations, onOpen, streaming }: {
         components={{
           a: ({ href, children }) => {
             const m = href?.match(/^#cite-(\d+)$/)
-            if (m) return <CitationChip n={Number(m[1])} citation={byN.get(Number(m[1]))} onOpen={onOpen} />
+            if (m) {
+              const n = Number(m[1])
+              return <CitationChip n={n} citation={byN.get(n)} onOpen={onOpen} active={active === n} onHover={onHover} />
+            }
             return (
               <a href={href} target="_blank" rel="noreferrer">
                 {children}
@@ -165,7 +264,7 @@ export function AnswerMarkdown({ text, citations, onOpen, streaming }: {
   )
 }
 
-/** Slide-over document viewer that highlights the cited chunk. */
+/** Slide-over document viewer that highlights the cited passage. */
 export function DocumentDrawer({ docId, chunkId, onClose }: {
   docId: string | null
   chunkId?: string | null
@@ -189,10 +288,10 @@ export function DocumentDrawer({ docId, chunkId, onClose }: {
   if (!docId) return null
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
-      <div className="absolute inset-0 bg-slate-950/20 backdrop-blur-[1px]" onClick={onClose} />
-      <aside className="relative flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+      <div className="absolute inset-0 bg-slate-950/25" onClick={onClose} />
+      <aside className="relative flex h-full w-full max-w-2xl flex-col border-l border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-[#121a1d]">
         <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-5 py-3 dark:border-slate-800">
-          <span className="text-xs font-medium tracking-wide text-slate-500 uppercase">Source document</span>
+          <span className="text-sm font-medium text-slate-600 dark:text-slate-300">Source document</span>
           <div className="flex items-center gap-1">
             <Link
               to={`/documents/${docId}${chunkId ? `?chunk=${encodeURIComponent(chunkId)}` : ''}`}
@@ -201,7 +300,11 @@ export function DocumentDrawer({ docId, chunkId, onClose }: {
             >
               <ExternalLink className="size-4" />
             </Link>
-            <button onClick={onClose} className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <button
+              onClick={onClose}
+              className="rounded-md p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+              aria-label="Close"
+            >
               <X className="size-4" />
             </button>
           </div>
@@ -216,6 +319,10 @@ export function DocumentDrawer({ docId, chunkId, onClose }: {
   )
 }
 
+const SectionHeading = ({ children }: { children: React.ReactNode }) => (
+  <h3 className="mb-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">{children}</h3>
+)
+
 export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId?: string | null }) {
   const d = data.document
   const target = useRef<HTMLDivElement>(null)
@@ -223,20 +330,20 @@ export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId
     target.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [chunkId, data])
   const roles = { ...d.attendee_roles, ...d.author_roles }
-  const people = d.authors.length ? d.authors : d.attendees
+  const people = d.source_type === 'meeting' ? d.attendees : d.authors
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <header className="space-y-3">
         <div className="flex items-start gap-3">
           <SourceIcon type={d.source_type} className="mt-1 size-5 shrink-0" />
           <div className="min-w-0">
-            <h2 className="text-lg leading-snug font-semibold">{d.title}</h2>
+            <h2 className="text-xl leading-snug font-semibold">{displayTitle(d.title, fileName(d.source_file))}</h2>
             <p className="font-mono text-xs text-slate-500">{d.source_file}</p>
           </div>
         </div>
         <MetaBadges type={d.source_type} topic={d.topic_domain} priority={d.priority} products={d.products} />
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-          <dt className="text-slate-500">{d.authors.length ? 'Author' : 'Attendees'}</dt>
+          <dt className="text-slate-500">{peopleLabel(d.source_type, people.length)}</dt>
           <dd>
             {people.length
               ? people.map((p, i) => (
@@ -246,7 +353,7 @@ export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId
                     {roles[p] && <span className="text-slate-500"> ({roles[p]})</span>}
                   </span>
                 ))
-              : 'unknown'}
+              : <span className="text-slate-400">not recorded</span>}
           </dd>
           {d.reviewers.length > 0 && (
             <>
@@ -254,12 +361,8 @@ export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId
               <dd>{d.reviewers.join(', ')}</dd>
             </>
           )}
-          {d.date && (
-            <>
-              <dt className="text-slate-500">Date</dt>
-              <dd>{d.date}</dd>
-            </>
-          )}
+          <dt className="text-slate-500">Date</dt>
+          <dd className="tabular-nums">{d.date ?? <span className="text-slate-400">undated</span>}</dd>
           {d.meeting_type && (
             <>
               <dt className="text-slate-500">Type</dt>
@@ -267,28 +370,26 @@ export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId
             </>
           )}
         </dl>
-        <div className="flex gap-2">
-          <a
-            href={api.documentFileUrl(d.doc_id)}
-            className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-100"
-          >
-            <Download className="size-3.5" /> Download original
-          </a>
-        </div>
+        <a
+          href={api.documentFileUrl(d.doc_id)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-brand-700 hover:underline dark:text-brand-200"
+        >
+          <Download className="size-3.5" /> Download original
+        </a>
       </header>
 
       {d.summary && (
-        <section className="rounded-xl bg-slate-50 p-3 text-sm dark:bg-slate-800/50">
-          <h3 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Summary</h3>
+        <section className="rounded-md border-l-2 border-brand-200 bg-brand-50/50 px-3 py-2.5 text-sm leading-relaxed dark:border-brand-700 dark:bg-brand-900/20">
+          <SectionHeading>Summary</SectionHeading>
           <p>{d.summary}</p>
         </section>
       )}
 
       {(d.decisions.length > 0 || d.action_items.length > 0) && (
-        <section className="grid gap-3 sm:grid-cols-2">
+        <section className="grid gap-4 sm:grid-cols-2">
           {d.decisions.length > 0 && (
             <div>
-              <h3 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Decisions</h3>
+              <SectionHeading>Decisions</SectionHeading>
               <ul className="list-disc space-y-1 pl-4 text-sm">
                 {d.decisions.map((x) => (
                   <li key={x}>{x}</li>
@@ -298,12 +399,12 @@ export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId
           )}
           {d.action_items.length > 0 && (
             <div>
-              <h3 className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">Action items</h3>
+              <SectionHeading>Action items</SectionHeading>
               <ul className="space-y-1 text-sm">
                 {d.action_items.map((a) => (
                   <li key={a.task}>
                     <span className="font-medium">{a.owner}</span>: {a.task}
-                    {a.due_date && <span className="text-slate-500"> · due {a.due_date}</span>}
+                    {a.due_date && <span className="text-slate-500"> (due {a.due_date})</span>}
                   </li>
                 ))}
               </ul>
@@ -313,9 +414,9 @@ export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId
       )}
 
       <section>
-        <h3 className="mb-2 text-xs font-semibold tracking-wide text-slate-500 uppercase">
-          Content · {data.chunks.length} chunks
-        </h3>
+        <SectionHeading>
+          Content <span className="font-normal text-slate-500">({data.chunks.length} passages)</span>
+        </SectionHeading>
         <div className="space-y-2">
           {data.chunks.map((c) => {
             const hit = c.chunk_id === chunkId
@@ -325,17 +426,15 @@ export function DocumentBody({ data, chunkId }: { data: DocumentContent; chunkId
                 ref={hit ? target : undefined}
                 id={c.chunk_id}
                 className={cn(
-                  'rounded-lg border p-3 text-sm',
-                  hit
-                    ? 'chunk-highlight border-amber-300 dark:border-amber-600'
-                    : 'border-slate-100 dark:border-slate-800',
+                  'rounded-md border p-3 text-sm',
+                  hit ? 'chunk-highlight border-amber-300 dark:border-amber-600' : 'border-slate-200/80 dark:border-slate-800',
                 )}
               >
-                <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-400">
-                  <span className="truncate">{c.section ? humanize(c.section) : `Chunk ${c.chunk_index + 1}`}</span>
-                  {hit && <Badge tone="amber">Cited</Badge>}
+                <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                  <span className="truncate">{c.section ? sectionLabel(c.section) : `Passage ${c.chunk_index + 1}`}</span>
+                  {hit && <Badge tone="amber">Cited passage</Badge>}
                 </div>
-                <div className="prose prose-sm max-w-none prose-slate dark:prose-invert prose-p:my-1 prose-table:text-xs">
+                <div className="prose prose-sm max-w-none overflow-x-auto prose-slate dark:prose-invert prose-p:my-1 prose-headings:my-1.5 prose-headings:text-sm prose-table:text-xs">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.text}</ReactMarkdown>
                 </div>
               </div>

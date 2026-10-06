@@ -1,3 +1,5 @@
+"""FastAPI application entry point."""
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -6,10 +8,24 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import routes, routes_chat, routes_review
+from app import api
 from app.config import get_settings
-from app.db.sqlite import init_db
-from app.llm.factory import ConfigError
+from app.db import init_db
+from app.ingest import _encoding
+from app.llm import ConfigError, get_embeddings, get_llm
+from app.search import get_vectorstore, invalidate_bm25
+
+# ---- state --------------------------------------------------------------------------------
+# Reset cached singletons (settings, models, vector store, BM25). Used after config changes.
+
+
+def reset_all() -> None:
+    for fn in (get_settings, get_llm, get_embeddings, get_vectorstore, _encoding):
+        fn.cache_clear()
+    invalidate_bm25()
+
+
+# ---- main ---------------------------------------------------------------------------------
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -44,5 +60,4 @@ async def _provider_unreachable(_: Request, exc: Exception) -> JSONResponse:
     )
 
 
-for module in (routes, routes_chat, routes_review):
-    app.include_router(module.router)
+app.include_router(api.router)

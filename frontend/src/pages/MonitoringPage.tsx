@@ -56,7 +56,7 @@ export default function MonitoringPage() {
                 <button
                   key={w}
                   onClick={() => setWindow(w)}
-                  className={cn('rounded-md px-3 py-1', window === w ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-600 dark:text-slate-400')}
+                  className={cn('rounded-md px-3 py-1', window === w ? 'bg-brand-600 text-white dark:bg-brand-500' : 'text-slate-600 dark:text-slate-400')}
                 >
                   {w}
                 </button>
@@ -154,7 +154,7 @@ export default function MonitoringPage() {
 function AlertList({ summary }: { summary: MetricsSummary }) {
   if (summary.alerts.length === 0) {
     return (
-      <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+      <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
         <CheckCircle2 className="size-4" />
         {summary.current.knowledge_queries < 5
           ? 'Healthy: not enough traffic for alerting yet (needs 5+ knowledge questions).'
@@ -168,7 +168,7 @@ function AlertList({ summary }: { summary: MetricsSummary }) {
         <div
           key={a.metric + a.message}
           className={cn(
-            'flex items-start gap-2 rounded-xl border px-4 py-2.5 text-sm',
+            'flex items-start gap-2 rounded-md border px-4 py-2.5 text-sm',
             a.severity === 'critical'
               ? 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300'
               : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300',

@@ -109,7 +109,7 @@ export default function EvalsPage() {
       <ErrorBanner error={error} />
 
       <Card className="mb-6 flex flex-wrap items-center gap-3 p-4 text-sm">
-        <Wand2 className="size-4 text-violet-500" />
+        <Wand2 className="size-4 text-brand-600" />
         <span className="flex-1 text-slate-600 dark:text-slate-300">
           Generate a synthetic set: the LLM writes one question per sampled document chunk, and that chunk's file becomes the expected source.
         </span>
@@ -129,13 +129,13 @@ export default function EvalsPage() {
       {runs && runs.length > 0 && (
         <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
           <div className="space-y-2">
-            <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Runs</h3>
+            <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Runs</h3>
             {runs.map((r) => (
               <button
                 key={r.id}
                 onClick={() => select(r.id)}
                 className={cn(
-                  'w-full rounded-xl border p-3 text-left text-sm transition',
+                  'w-full rounded-md border p-3 text-left text-sm transition',
                   selected?.id === r.id
                     ? 'border-brand-500 bg-brand-50/50 dark:bg-brand-700/10'
                     : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900',

@@ -1,5 +1,5 @@
-- [Project status](project-status.md) — FastChip RAG take-home: what's built/pushed (8b509ba), open tasks, stale docs
+- [Project status](project-status.md) — FastChip RAG take-home: what's built and committed, dataset origin, open tasks
 - [Git confirmation](feedback-git-confirmation.md) — ask before every commit/push; scan for secrets first
 - [TASKS.md status only](feedback-tasks-md-status-only.md) — only change status markers/add notes, never rewrite tasks
 - [data/ folder](feedback-data-folder.md) — don't read data/ unless asked; keep fixtures small
-- [No fake models](feedback-no-fake-models.md) — openai or ollama only; structure-aware recursive chunking
+- [No fake models](feedback-no-fake-models.md) — real LangChain providers only (openai, google_genai, ollama, …); structure-aware recursive chunking

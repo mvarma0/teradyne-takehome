@@ -2,6 +2,10 @@
 
 Status legend: `[x]` done (verified) · `[~]` in progress · `[ ]` to do.
 
+> Note (2026-10-06): the backend was later flattened into one module per concern (see `TECH.md` §1). File paths in tasks written before F9 refer to the original layout. Old → current: `app/llm/*` → `llm.py`; `app/db/*` → `db.py` + `schema.sql`; `app/models/*` → `schemas.py`; `app/ingestion/loaders/*`, `docling_md.py` → `loaders.py`; `app/ingestion/{pipeline,chunking,enrich}.py` → `ingest.py`; `app/retrieval/*` → `search.py`; `app/answer/{chat,citations,confidence}.py` → `answer.py`; `app/answer/guardrails.py` → `guardrails.py`; `app/answer/business_rules.py` → `rules.py`; `app/routing/*`, `app/feedback/*` → `feedback.py`; `app/observability/*` → `metrics.py`; `app/evals/*` → `evals.py`; `app/api/*` → `api.py`.
+>
+> Note (2026-10-06): the dataset was re-dated by 104 weeks (2024 → 2026, weekdays preserved) and now holds 24 meetings + 16 Office documents (40 files). Older status notes and examples that mention 2024 dates, "20 meetings + 15 documents" or 35 files predate this change.
+
 Execute in order. Each task lists **Input** (what must exist), **Files** (what it creates or modifies), **Accept** (acceptance criteria) and **Verify** (the command or check). Mark `[x]` only after Verify passes. Commands assume `backend/` or `frontend/` as cwd unless noted.
 
 ---
@@ -80,6 +84,8 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
 - [ ] **1.10 Real-data run** (when `data/meetings/` is complete)
   - Verify: `POST /api/ingest` → `files_found` = 20, `failed` = []; check `warnings` for files without attendee lists; spot-check `GET /api/documents` topics/priorities; run `./scripts/smoke_ex1.sh`
   - Status: To do: waiting for the full real-data run (`data/` now has 20 meetings + 15 documents).
+  - Status (T3 run, Gemini `gemini-3.1-flash-lite` + `gemini-embedding-001`): ingest of all 35 files done (0 failed, 173 chunks); `smoke_ex1.sh` updated for the current payload and passes on real data. **Pending:** re-ingest the 5 spreadsheets after their author properties were added, then mark done.
+  - Status (2026-10-06): the dataset now has 24 meetings + 16 documents (40 files) after the quality pass; the full real-data ingest still has to be re-run against it.
 
 ---
 
@@ -97,6 +103,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Accept: one section per slide (title, text, notes) with location `slide N`; author
   - Verify: pytest; dry-run lists 5 pptx
   - Status: Done: in `office.py`, one `## Slide N` section per slide plus speaker notes. The dataset's .pptx files are plain text, so they go through the text fallback and are flagged in the report.
+  - Status (2026-10-06): the dataset's .pptx files were later rebuilt as real OOXML decks, so they now go through the docling path; the text fallback remains for non-OOXML files.
 
 - [x] **2.3 XLSX loader**
   - Files: `app/ingestion/loaders/xlsx.py`, `tests/test_xlsx_loader.py`
@@ -105,6 +112,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Status: Done: in `office.py`, one `## Sheet: name` section per sheet (docling markdown tables); tables split by rows with the header repeated (`chunking.py`).
 
 - [~] **2.4 Legacy formats + unified pipeline**
+  - Status (T3 run): 35 docs ingested on real data (20 meeting, 5 docx, 5 pptx, 5 xlsx). The 5 spreadsheets had no author/date properties; added author, title and date (user-approved data change, sheet contents unchanged; openpyxl + docling read them). **Pending:** re-ingest them; a LibreOffice check could not run here (Calc not installed in the sandbox).
   - Files: `app/ingestion/loaders/legacy.py`, `app/ingestion/loaders/__init__.py` (extension registry), `app/ingestion/pipeline.py`, `app/ingestion/chunking.py` (keep location metadata)
   - Accept: `.doc/.ppt/.xls` converted with `soffice --headless --convert-to` if available, else skipped with a warning; all types share one SourceDoc/enrichment path
   - Verify: `uv run python -m app.ingestion` → 35 docs; `curl -s 'localhost:8000/api/documents?source_type=xlsx' | jq length` → 5
@@ -169,12 +177,15 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Accept: reports hit@k, MRR, citation validity and answerability on unanswerable controls; non-zero exit below the target (used as a regression gate); calibrate `CONFIDENCE_THRESHOLD`
   - Verify: `uv run python -m eval.run_eval` prints the report; hit@5 ≥ 0.8
   - Status: In progress: `eval/golden.jsonl` (11 questions from one docx + 3 controls), runner in `app/evals/` (`uv run python -m app.evals`), synthetic generator. Synthetic run verified on demo data. Still open: the golden run on real data and threshold calibration.
+  - Status (T3 run): **Pending:** extend the golden set across meetings/docx/pptx/xlsx, run it on real data, calibrate `CONFIDENCE_THRESHOLD`. Note: the Gemini free tier allows 15 requests/min per model (`LLM_MAX_RPM=14`), so a question takes about a minute.
+  - Status (2026-10-06): F9 ran the golden eval on real data with Gemini (hit rate 1.0, faithfulness 1.0, relevance 1.0). Still open: extend the set beyond one docx, re-run it on the 40-file dataset, and calibrate `CONFIDENCE_THRESHOLD`.
 
 - [x] **2.15 Ex2 smoke** ✅ CHECKPOINT
   - Files: `scripts/smoke_ex2.sh`
   - Accept: covers a meeting + office answer, citations with people, a low-confidence routing, reject, correct, gaps, review queue and metrics
   - Verify: `uv run pytest` && `./scripts/smoke_ex2.sh` green
   - Status: Done (on fixtures + mock Office files): `./scripts/smoke_ex2.sh` all checks passed against a live server, and the Ollama integration test passes. Re-run on real data with 1.10 / 2.4.
+  - Status (T3 run): **Pending:** on real data it failed "every citation has source file + author" because `yield_tracker.xlsx` had no author; fixed in the data, re-run after the spreadsheet re-ingest.
 
 ---
 
@@ -241,6 +252,75 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
 
 ---
 
+## Additional scope (requested 2026-10-06)
+
+- [x] **F1 README rewrite**
+  - Files: `README.md`
+  - Accept: clean, simple and informative, modelled on github.com/tanzeela-16/RAG_Chatbot_ComapnyDocs: one-line pitch, features table, architecture diagram + pipeline steps, quick start, tech stack, project structure, links to deeper docs
+  - Verify: following the quick start from a clean clone runs the app
+  - Status: Done: README follows the reference layout (features, architecture, quick start, pages, stack, structure, tests, docs).
+
+- [x] **F2 Traceability page**
+  - Files: `backend/app/api/routes_review.py` (or new route), `frontend/src/pages/TracePage.tsx`, `App.tsx`, `api/client.ts`, `types.ts`
+  - Accept: a new menu entry lists answered questions; each trace shows the question → guardrail verdict → rewritten query → retrieved chunks with scores (semantic, BM25, fused, rerank) and which were cited → claims kept/dropped → confidence → status/routing/gaps/feedback
+  - Verify: ask a question in Chat, open Trace, and see that query with its retrieved and cited documents
+  - Status: Done: `GET /api/traces[/{id}]`, Traceability page with a 7-step lineage, *Trace* link on each answer; verified in the browser and `tests/test_upload_and_traces.py`.
+
+- [x] **F3 Document upload**
+  - Files: `backend/app/api/routes.py`, `frontend/src/pages/DocumentsPage.tsx`, `api/client.ts`, `CLAUDE.md` (data/ rule updated: UI uploads may write to `data/`)
+  - Accept: the Documents page uploads a new or updated file (.md meeting, .docx/.pptx/.xlsx/.doc/.ppt/.xls); it is saved under `data/meetings/` or `data/documents/<ext>/` (same name = replace) and ingested; unsupported types and unsafe names are rejected
+  - Verify: upload a file → it appears in the list with derived metadata; re-upload it changed → re-ingested, not duplicated
+  - Status: Done: endpoint + Upload button; `tests/test_upload_and_traces.py` covers placement, replace, bad names/types. Real run: re-uploaded `meeting_2024_01_08_volta7_ramp_kickoff.md` unchanged → saved to `meetings/`, `replaced: true`, ingest 35 found / 0 ingested / 35 unchanged, file bytes and `data/` git status unchanged; `.exe` → 415. (That run predates the re-dating; the file is now `meeting_2026_01_05_volta7_ramp_kickoff.md`.)
+
+- [x] **F4 About page**
+  - Files: `frontend/src/pages/AboutPage.tsx`, `App.tsx`
+  - Accept: explains what the system is, what it does (ingest → retrieve → cited answer → route → review → monitor) and how to use each page
+  - Verify: `npm run build`; the page renders from the nav
+  - Status: Done: `/about`, in the nav; `npm run build` passes; checked in the browser.
+
+- [x] **F5 Chat layout does not jump when citations appear**
+  - Files: `frontend/src/pages/ChatPage.tsx` / `components/chat.tsx`
+  - Accept: the chat column keeps its position and width when the sources panel opens
+  - Verify: ask a question; the message column doesn't shift left when sources arrive
+  - Status: Done: the sources column is reserved from the start; Playwright measured the composer at the same x/width before, during and after an answer.
+
+- [x] **F6 Clean `.env`**
+  - Files: `backend/.env.example`, `backend/.env` (values kept), `backend/README.md`
+  - Accept: the top section holds only what must be chosen (provider, model, key); all tuning is optional, commented out and defaults to `app/config.py`
+  - Verify: `cp .env.example .env` + pick a preset → server starts; `uv run pytest -m "not integration"`
+  - Status: Done: `.env.example` rewritten (one required preset + commented optional tuning); local `backend/.env` replaced with it on preset B (Ollama), old file kept as `backend/.env.bak`; every setting resolves to the same value as before.
+
+- [x] **F7 DELIVERABLE.md**
+  - Files: `DELIVERABLE.md`
+  - Accept: every deliverable from the brief, how it is met and exactly where (files, endpoints, UI pages)
+  - Verify: each requirement in `take-home-assignment.md` maps to a row
+  - Status: Done: every requirement in the brief mapped to how it's met and where (files, endpoints, pages).
+
+- [x] **F8 Data quality pass**
+  - Files: `data/**` (user-approved), `backend/eval/golden.jsonl`, `backend/app/answer/guardrails.py`, `CLAUDE.md`
+  - Accept: sources agree with each other (HTOL lot, Rev B reliability timeline, CMP fix date, mask list); text defects fixed; supply-chain and executive-strategy meetings and a company overview added; timeline moved to 2026 with weekdays preserved; "What does FastChip do?" gets a cited answer and "what is this system?" gets the assistant introduction
+  - Verify: re-ingest reports 0 failures; `POST /api/query` "What does FastChip do?" cites `fastchip_company_overview.docx`; golden eval runs
+  - Status: Done: re-ingest 40/40 with 0 failures (Ollama and Gemini); "What does FastChip do?" answers from `fastchip_company_overview.docx` (confidence 0.95); golden eval runs.
+
+- [x] **F9 Flatten backend, fix dropped answers, honest faithfulness**
+  - Files: `backend/app/*.py` (45 files in 12 folders → 15 modules), `backend/tests/`, `TECH.md`, docs
+  - Accept: same API (29 paths) and tests; uncited but supported sentences are re-attached instead of dropped; questions about the assistant get the introduction; faithfulness judged per claim on full chunk text; runs on Gemini (`google_genai`)
+  - Verify: `uv run pytest -m "not integration"`; "What does FastChip do?" cites `fastchip_company_overview.docx`; golden eval faithfulness ≥ 0.7
+  - Status: Done: 15 modules, 41 unit tests, 29 API paths, smoke Ex1 9/9 and Ex2 12/12 on Gemini; golden eval faithfulness 1.0 (20/20 claims), hit rate 1.0, relevance 1.0. Answers that admit missing information are now capped at 0.45 so they route.
+
+- [x] **F10 Workspace and setup polish** (requested 2026-10-06)
+  - Files: `backend/pyproject.toml`, `backend/uv.lock`, `README.md`, `docs/MEASUREMENT.md`, `.claude/settings.json`, `.claude/skills/verify/SKILL.md`, `take-home-assignment.md`, `CLAUDE.md`, docs and memory
+  - Accept:
+    - Backend installs without PyTorch: `docling` → `docling-slim[convert-core,format-office,format-markdown]` (only Markdown/DOCX/PPTX/XLSX are parsed)
+    - README lists the real system requirements (Python 3.12+, uv, **Node 20.19+ / 22.12+**, disk) and treats all providers equally, using tables and short steps
+    - `MEASUREMENT.md` states one metric with a formula, a target and a check against missing feedback, in one paragraph
+    - A ruff `PostToolUse` hook and a `/verify` skill package the Verify steps
+    - Docs agree with the code and data: no stale module paths or 2024 dates, `take-home-assignment.md` labelled as the working spec over the PDF brief, dataset origin (generated outside this workspace) stated
+  - Verify: `/verify` (lint, unit, Ollama integration, frontend build); re-parse all 40 files with docling-slim and compare with the stored content
+  - Status: Done: backend install 1.5 GB → 625 MB; all 40 files parse to identical content; lint, 50 unit tests and the Ollama integration test pass; the hook was shown to reformat an edited file.
+
+---
+
 ## Backlog
 
 - [ ] **B1 Ingestion progress visibility**
@@ -267,6 +347,7 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
     - Config `INFER_FILTERS=true|false` (default true) plus per-request `"infer_filters": false`
     - Response includes `retrieval.applied_filters` and `retrieval.filters_source` (`explicit|inferred|none`), so the UI can show and clear inferred filters
   - Verify: `uv run pytest tests/test_filter_extraction.py`; `curl -XPOST localhost:8000/api/query -d '{"query":"What did Lisa say in January 2024?"}'` shows `applied_filters.person` = "Lisa Park" and only her meetings in `results`; a question naming an unknown person returns unfiltered results with `filters_source: "none"`
+  - Note (2026-10-06): the dataset is now dated 2026, so use "January 2026" in the examples above.
 
 ---
 
@@ -278,3 +359,8 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
 5. No auth: `submitted_by`/reviewer are free text.
 6. Pinned Python 3.12 (the system has 3.13) for chromadb wheel safety.
 7. `OPENAI_API_KEY` needed for real ingestion, querying and eval; tests run offline.
+
+Status of the flags (2026-10-06):
+- 1: resolved. The dataset is final (24 meetings + 16 documents); `fastchip_company_overview.docx` ties Volta-7 to the brief's company, and routing uses the people parsed from the data.
+- 3: resolved. Core properties (author, title, date) are populated in all Office files and parsed by the loader.
+- 7: superseded. Any LangChain provider works (OpenAI, Gemini, Ollama, …); tests run against real local Ollama, not offline fakes.

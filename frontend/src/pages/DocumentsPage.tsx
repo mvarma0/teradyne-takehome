@@ -1,10 +1,10 @@
-import { FileStack, RefreshCw, Search } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { FileStack, RefreshCw, Search, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { MetaBadges, SOURCE_LABEL, SourceIcon } from '../components/meta'
 import { Badge, Button, Card, EmptyState, ErrorBanner, inputClass, PageHeader, Spinner } from '../components/ui'
-import { humanize } from '../lib/format'
+import { displayTitle, label, peopleLabel } from '../lib/format'
 import type { DocumentMeta, Stats } from '../types'
 
 export default function DocumentsPage() {
@@ -16,6 +16,8 @@ export default function DocumentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [ingesting, setIngesting] = useState(false)
   const [report, setReport] = useState<Record<string, unknown> | null>(null)
+  const [uploaded, setUploaded] = useState<{ file: string; replaced: boolean }[]>([])
+  const fileInput = useRef<HTMLInputElement>(null)
 
   const load = () => {
     api.documents().then(setDocs).catch((e) => setError(e.message))
@@ -36,6 +38,28 @@ export default function DocumentsPage() {
     }
   }
 
+  // Each file is saved into data/ (same name replaces it) and only changed files are re-ingested.
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return
+    setIngesting(true)
+    setError(null)
+    const done: { file: string; replaced: boolean }[] = []
+    try {
+      for (const f of Array.from(files)) {
+        const r = await api.uploadDocument(f)
+        done.push({ file: r.source_file, replaced: r.replaced })
+        setReport(r.report)
+      }
+      load()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setUploaded(done)
+      setIngesting(false)
+      if (fileInput.current) fileInput.current.value = ''
+    }
+  }
+
   const topics = useMemo(() => [...new Set((docs ?? []).map((d) => d.topic_domain).filter(Boolean))] as string[], [docs])
   const filtered = (docs ?? []).filter((d) => {
     const q = query.toLowerCase()
@@ -53,21 +77,43 @@ export default function DocumentsPage() {
         title="Documents"
         subtitle={
           stats
-            ? `${stats.documents} documents · ${stats.chunks} chunks · ${stats.embeddings} · ${stats.llm}`
-            : 'Ingested meetings and Office documents with derived metadata'
+            ? `${stats.documents} sources indexed as ${stats.chunks} passages. Models: ${stats.llm} for answers, ${stats.embeddings} for search.`
+            : 'Meetings and Office documents, with the metadata derived from each'
         }
         actions={
           <>
-            <Button onClick={() => ingest(false)} loading={ingesting}>
-              <RefreshCw className="size-3.5" /> Ingest new / changed
+            <input
+              ref={fileInput}
+              type="file"
+              multiple
+              accept=".md,.docx,.pptx,.xlsx,.doc,.ppt,.xls"
+              className="hidden"
+              onChange={(e) => upload(e.target.files)}
+            />
+            <Button
+              variant="primary"
+              onClick={() => fileInput.current?.click()}
+              disabled={ingesting}
+              title="Add a new meeting (.md) or Office file, or replace an existing one with the same name"
+            >
+              <Upload className="size-3.5" /> Upload
             </Button>
-            <Button variant="ghost" onClick={() => ingest(true)} disabled={ingesting} title="Re-enrich and re-embed everything">
-              Force re-ingest
+            <Button onClick={() => ingest(false)} loading={ingesting}>
+              <RefreshCw className="size-3.5" /> Ingest changes
+            </Button>
+            <Button variant="ghost" onClick={() => ingest(true)} disabled={ingesting} title="Re-derive metadata and re-embed every file">
+              Re-ingest all
             </Button>
           </>
         }
       />
       <ErrorBanner error={error} />
+      {uploaded.length > 0 && (
+        <Card className="mb-2 p-3 text-sm">
+          <span className="font-medium">Uploaded:</span>{' '}
+          {uploaded.map((u) => `${u.file}${u.replaced ? ' (replaced the previous version)' : ''}`).join(', ')}
+        </Card>
+      )}
       {report && (
         <Card className="mb-4 p-3 text-sm">
           <div className="flex flex-wrap items-center gap-3">
@@ -107,7 +153,7 @@ export default function DocumentsPage() {
           <option value="">All topics</option>
           {topics.map((t) => (
             <option key={t} value={t}>
-              {humanize(t)}
+              {label(t)}
             </option>
           ))}
         </select>
@@ -116,35 +162,47 @@ export default function DocumentsPage() {
       {!docs && !error && <Spinner />}
       {docs && filtered.length === 0 && (
         <EmptyState icon={<FileStack className="size-10" />} title={docs.length ? 'No matching documents' : 'Nothing ingested yet'}>
-          {!docs.length && 'Run an ingest to load data/meetings and data/documents.'}
+          {!docs.length && 'Upload files, or run an ingest to load data/meetings and data/documents.'}
         </EmptyState>
       )}
-      <div className="grid gap-3 md:grid-cols-2">
-        {filtered.map((d) => {
-          const people = d.authors.length ? d.authors : d.attendees
-          return (
-            <Link key={d.doc_id} to={`/documents/${d.doc_id}`}>
-              <Card className="h-full p-4 transition hover:border-brand-500 hover:shadow-md">
-                <div className="flex items-start gap-3">
-                  <SourceIcon type={d.source_type} className="mt-0.5 size-5 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{d.title}</p>
-                    <p className="truncate font-mono text-[11px] text-slate-500">{d.source_file}</p>
-                  </div>
-                  {d.date && <span className="shrink-0 text-xs text-slate-500">{d.date}</span>}
-                </div>
-                <div className="mt-2">
-                  <MetaBadges type={d.source_type} topic={d.topic_domain} priority={d.priority} products={d.products} />
-                </div>
-                {d.summary && <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-400">{d.summary}</p>}
-                <p className="mt-2 truncate text-xs text-slate-500">
-                  <span className="font-medium">{d.authors.length ? 'Author' : 'Attendees'}:</span> {people.join(', ') || 'unknown'}
-                </p>
-              </Card>
-            </Link>
-          )
-        })}
-      </div>
+      {docs && filtered.length > 0 && (
+        <Card className="overflow-hidden">
+          <div className="hidden grid-cols-[minmax(0,1fr)_200px_92px] gap-6 border-b border-slate-200/80 bg-slate-50/70 px-4 py-2 text-xs font-medium text-slate-500 md:grid dark:border-slate-800 dark:bg-slate-900/40">
+            <span>Source</span>
+            <span>People</span>
+            <span className="text-right">Date</span>
+          </div>
+          <ul className="divide-y divide-slate-200/80 dark:divide-slate-800">
+            {filtered.map((d) => {
+              const people = d.source_type === 'meeting' ? d.attendees : d.authors
+              return (
+                <li key={d.doc_id}>
+                  <Link
+                    to={`/documents/${d.doc_id}`}
+                    className="grid gap-x-6 gap-y-2 px-4 py-3.5 transition-colors hover:bg-slate-50 md:grid-cols-[minmax(0,1fr)_200px_92px] dark:hover:bg-slate-800/40"
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <SourceIcon type={d.source_type} className="mt-0.5 size-[18px] shrink-0" />
+                      <div className="min-w-0 space-y-1">
+                        <p className="truncate text-sm font-medium">{displayTitle(d.title, d.source_file)}</p>
+                        <p className="truncate font-mono text-[11px] text-slate-500">{d.source_file}</p>
+                        <MetaBadges topic={d.topic_domain} priority={d.priority} products={d.products} />
+                      </div>
+                    </div>
+                    <p className="line-clamp-2 pl-[30px] text-xs leading-relaxed text-slate-600 md:pl-0 dark:text-slate-400">
+                      <span className="text-slate-500 md:hidden">{peopleLabel(d.source_type, people.length)} </span>
+                      {people.length ? people.join(', ') : <span className="text-slate-400">No author recorded</span>}
+                    </p>
+                    <p className="pl-[30px] text-xs text-slate-500 tabular-nums md:pl-0 md:text-right">
+                      {d.date ?? <span className="text-slate-400">undated</span>}
+                    </p>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+        </Card>
+      )}
     </>
   )
 }

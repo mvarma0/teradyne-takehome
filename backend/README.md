@@ -14,9 +14,11 @@ cp .env.example .env         # then edit .env (see section 2)
 
 ---
 
-## 2. Configuration: OpenAI or Ollama
+## 2. Configuration: choosing model providers
 
 **All configuration goes in `backend/.env`.** You never edit code to switch models.
+
+`.env.example` has two parts. **1. Models** is the only required part: keep one preset (A OpenAI, B Ollama or C Gemini) uncommented and add its key. **2. Optional tuning** lists every other setting, commented out with its default; uncomment a line only to change it.
 
 `app/config.py` only declares which settings exist, their types and fallback defaults. Values resolve in this order, first match wins:
 
@@ -24,7 +26,7 @@ cp .env.example .env         # then edit .env (see section 2)
 2. `backend/.env`
 3. Default in `app/config.py`
 
-The **LLM** and the **embedding model** are chosen independently.
+The **LLM** and the **embedding model** are chosen independently. A provider is any [LangChain provider id](https://python.langchain.com/docs/integrations/chat/); clients are built with `init_chat_model` / `init_embeddings` in `app/llm.py`, so switching provider never needs a code change. `openai`, `google_genai` and `ollama` are installed; the options below are presets.
 
 ### Option A: OpenAI
 
@@ -52,6 +54,31 @@ EMBEDDING_PROVIDER=ollama
 EMBEDDING_MODEL=nomic-embed-text
 ```
 
+### Option C: Google Gemini (free tier available)
+
+```env
+GOOGLE_API_KEY=...
+LLM_PROVIDER=google_genai
+LLM_MODEL=gemini-3.1-flash-lite
+EMBEDDING_PROVIDER=google_genai
+EMBEDDING_MODEL=gemini-embedding-001
+LLM_MAX_RPM=15               # stay under the free tier's per-minute limit
+```
+
+### Any other provider
+
+```bash
+uv add langchain-anthropic   # or langchain-groq, langchain-mistralai, ...
+```
+
+```env
+ANTHROPIC_API_KEY=...
+LLM_PROVIDER=anthropic
+LLM_MODEL=<model name>
+```
+
+An **OpenAI-compatible endpoint** (vLLM, LM Studio, GitHub Models, ...) uses `LLM_PROVIDER=openai` with `LLM_BASE_URL` and `LLM_API_KEY`.
+
 ### Mixing providers
 
 For example, local embeddings with an OpenAI LLM:
@@ -77,17 +104,21 @@ EMBEDDING_MODEL=nomic-embed-text
 - **Changing the embedding model requires re-ingesting.** Each embedding model gets its own Chroma collection (e.g. `fastchip__ollama-nomic-embed-text`), so vectors from different models never mix. Run `POST /api/ingest` after switching.
 - **Changing the LLM** doesn't require re-ingesting. To re-derive metadata with the new LLM, ingest with `{"force": true}`.
 - `GET /api/stats` shows the active providers and collection.
-- With `*_PROVIDER=openai` and no `OPENAI_API_KEY`, calls return **HTTP 503** with a clear message.
+- A provider with no API key set (e.g. `openai` without `OPENAI_API_KEY`), or whose LangChain package isn't installed, returns **HTTP 503** with a clear message.
 
 ### All settings (`.env`)
 
 | Setting | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | (empty) | Required when any provider is `openai` |
+| `OPENAI_API_KEY` / `GOOGLE_API_KEY` / `<PROVIDER>_API_KEY` | (empty) | Key for the provider in use |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
-| `LLM_PROVIDER` / `LLM_MODEL` | `openai` / `gpt-4o-mini` | LLM (`openai` or `ollama`) |
+| `LLM_PROVIDER` / `LLM_MODEL` | `openai` / `gpt-4o-mini` | LLM: any LangChain provider id (`openai`, `google_genai`, `ollama`, ...) |
 | `LLM_TEMPERATURE` | `0` | LLM temperature |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | `openai` / `text-embedding-3-small` | Embeddings (`openai` or `ollama`) |
+| `LLM_BASE_URL` / `LLM_API_KEY` | (empty) | Optional endpoint and key override (OpenAI-compatible servers) |
+| `LLM_STRUCTURED_OUTPUT` | `auto` | Structured-output method; `auto` picks the best per provider |
+| `LLM_MAX_RPM` / `LLM_MAX_RETRIES` | `0` / `3` | Client-side rate limit (0 = off) and retries, for rate-limited tiers |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` | `openai` / `text-embedding-3-small` | Embeddings: any LangChain provider id |
+| `EMBEDDING_BASE_URL` / `EMBEDDING_API_KEY` | (empty) | Optional endpoint and key override |
 | `USE_DOCLING` | `true` | Parse documents with docling |
 | `CHUNK_MAX_TOKENS` | `512` | Upper bound per chunk; sections under this stay whole |
 | `CHUNK_MIN_TOKENS` | `80` | Smaller sections merge with a neighbour |
@@ -135,7 +166,7 @@ Sources: `data/meetings/*.md` and `data/documents/**/*.{docx,pptx,xlsx,doc,ppt,x
 ```bash
 curl -X POST localhost:8000/api/ingest                                   # new / changed files
 curl -X POST localhost:8000/api/ingest -H 'content-type: application/json' -d '{"force": true}'
-uv run python -m app.ingestion [--force] [--dry-run]                     # CLI; dry-run = parse + chunk, no models
+uv run python -m app.ingest [--force] [--dry-run]                     # CLI; dry-run = parse + chunk, no models
 ```
 You can also click **Ingest** on the app's Documents page.
 
@@ -143,12 +174,12 @@ The report includes `files_found`, `ingested`, `skipped_unchanged`, `removed`, `
 
 | Step | Code |
 |---|---|
-| Meetings: title, date, attendees + roles, meeting type, location (deterministic, no LLM) | `app/ingestion/loaders/meeting.py` |
-| Office: docling content per slide (`## Slide N` + speaker notes) / sheet (`## Sheet: name`); author, reviewers, title and date from core properties or body bylines (`**Author:** Name, Role`); non-OOXML → text fallback; legacy formats via LibreOffice | `app/ingestion/loaders/office.py` |
-| LLM enrichment (topic, priority, products, summary, key topics, decisions, action items), cached | `app/ingestion/enrich.py` |
-| Business rules R1-R3 (priority floor, owners and products must appear in the source) | `app/answer/business_rules.py` |
-| Structure-aware recursive chunking; tables split by rows with the header repeated | `app/ingestion/chunking.py` |
-| Embed + store in Chroma; metadata + content in SQLite | `app/retrieval/vectorstore.py`, `app/db/repository.py` |
+| Meetings: title, date, attendees + roles, meeting type, location (deterministic, no LLM) | `app/loaders.py` |
+| Office: docling content per slide (`## Slide N` + speaker notes) / sheet (`## Sheet: name`); author, reviewers, title and date from core properties or body bylines (`**Author:** Name, Role`); non-OOXML → text fallback; legacy formats via LibreOffice | `app/loaders.py` |
+| LLM enrichment (topic, priority, products, summary, key topics, decisions, action items), cached | `app/ingest.py` |
+| Business rules R1-R3 (priority floor, owners and products must appear in the source) | `app/rules.py` |
+| Structure-aware recursive chunking; tables split by rows with the header repeated | `app/ingest.py` |
+| Embed + store in Chroma; metadata + content in SQLite | `app/search.py`, `app/db.py` |
 
 Ingestion is idempotent per content hash and active collection, and deleted files are pruned.
 
@@ -194,7 +225,7 @@ All filters are pre-filters, applied before ranking.
   "claims": [{"text": "…", "citations": [1], "kind": "fact", "supported": true}],
   "dropped_claims": ["uncited statement removed by rule R5"],
   "citations": [{"n": 1, "chunk_id": "…", "doc_id": "…", "source_file": "documents/docx/….docx",
-                 "source_type": "docx", "title": "…", "section": "…", "date": "2024-03-31",
+                 "source_type": "docx", "title": "…", "section": "…", "date": "2026-03-29",
                  "people": ["James Ortiz"], "people_label": "Author", "attendees": [], "authors": ["James Ortiz"],
                  "topic_domain": "yield", "priority": "high", "products": ["Volta-7"],
                  "snippet": "…", "scores": {"semantic": 0.71, "bm25": 4.2, "fused": 0.03, "rerank": 9}}],
@@ -207,7 +238,7 @@ All filters are pre-filters, applied before ranking.
 }
 ```
 
-### Pipeline (`app/answer/chat.py`)
+### Pipeline (`app/answer.py`)
 1. **Input guardrails:** prompt-injection heuristics plus an LLM classifier. Injection is blocked, off-topic is declined, small talk gets a canned reply.
 2. **Condense:** a follow-up is rewritten into a standalone query using the conversation history.
 3. **Retrieve:** pre-filter → semantic + BM25 → weighted RRF → pointwise LLM rerank.
@@ -226,10 +257,12 @@ All filters are pre-filters, applied before ranking.
 | POST | `/api/ingest` | Run ingestion (`{"force": true}` optional) |
 | GET | `/api/documents` | Documents with derived metadata (`topic_domain`, `priority`, `source_type`, `person`) |
 | GET | `/api/documents/{id}`, `/content`, `/file` | Metadata; normalized content + chunks (viewer); original file download |
+| POST | `/api/documents/upload?filename=…` | Raw file body. Saves a new or updated `.md`/Office file into `data/meetings/` or `data/documents/<ext>/` (same name replaces it), then ingests changes |
 | POST | `/api/chat/stream` | Streaming conversational answer (SSE) |
 | GET/PATCH/DELETE | `/api/conversations[/{id}]` | List, read (with messages), rename, delete conversations |
 | POST | `/api/query` | Single-shot answer |
 | GET | `/api/query/{id}` | Stored answer with current status, feedback and routing |
+| GET | `/api/traces`, `/api/traces/{id}` | Traceability: every answered question with retrieved/cited sources; full lineage (guardrail, rewrite, retrieval scores, claims, confidence, routing, gaps, feedback) |
 | POST | `/api/query/{id}/correct` | `{correction, submitted_by}` → correction gap (keeps the original query + answer) |
 | POST | `/api/query/{id}/reject` | `{reason, submitted_by}` → rejected gap + routing suggestions |
 | POST | `/api/query/{id}/feedback` | `{rating: "up" \| "down" \| null}` |
@@ -290,5 +323,5 @@ Eval metrics:
 | Results empty after switching embedding model | Expected: the new model has its own collection, so re-ingest |
 | `409` on ingest | An ingestion run is already in progress |
 | Slow answers with Ollama | Local qwen2.5:7b runs guard + rewrite + rerank + generation sequentially (~20–60s). Set `RERANKER=none`, `GUARDRAILS_LLM=false`, or use OpenAI |
-| A `.pptx` shows `format: text-fallback` | The file isn't real PowerPoint (plain text with a .pptx name); it's still ingested and cited under its own name |
+| A file shows `format: text-fallback` | It has an Office extension but isn't real OOXML (e.g. plain text named `.pptx`). It's still ingested as text and cited under its own name; re-save it from Office to get slide- or sheet-level sections |
 | `files_found: 0` | Check that `DATA_DIR` points to the folder containing `meetings/` |
