@@ -5,9 +5,9 @@ import shutil
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from app import api
 from app.config import get_settings
@@ -42,6 +42,30 @@ def seed_storage() -> bool:
     if seed_chroma.is_dir():
         shutil.copytree(seed_chroma, s.chroma_dir)
     logging.getLogger(__name__).info("seeded storage from %s", s.seed_dir)
+    return True
+
+
+# ---- frontend -----------------------------------------------------------------------------
+# In a deployment (Docker) the built React app is served from the same origin as the API.
+# Unknown paths fall back to index.html so client-side routes survive a reload. In local dev
+# Vite serves the UI on :5173 and this is a no-op unless frontend/dist has been built.
+
+
+def mount_frontend(target: FastAPI) -> bool:
+    dist = get_settings().frontend_dist.resolve()
+    index = dist / "index.html"
+    if not index.is_file():
+        return False
+
+    @target.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        file = (dist / path).resolve()
+        if path and file.is_file() and file.is_relative_to(dist):
+            return FileResponse(file)
+        return FileResponse(index)
+
     return True
 
 
@@ -82,3 +106,4 @@ async def _provider_unreachable(_: Request, exc: Exception) -> JSONResponse:
 
 
 app.include_router(api.router)
+mount_frontend(app)
