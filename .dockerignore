@@ -1,0 +1,23 @@
+# Secrets and local state never enter the image
+**/.env
+**/.env.*
+!backend/.env.example
+backend/storage
+.claude/settings.local.json
+
+# Rebuilt inside the image
+**/.venv
+**/node_modules
+frontend/dist
+
+# Not needed at runtime
+.git
+.claude
+docs
+backend/tests
+backend/eval/*.log
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.DS_Store
+**/*.log
