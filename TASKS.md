@@ -319,6 +319,12 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Verify: `/verify` (lint, unit, Ollama integration, frontend build); re-parse all 40 files with docling-slim and compare with the stored content
   - Status: Done: backend install 1.5 GB → 625 MB; all 40 files parse to identical content; lint, 50 unit tests and the Ollama integration test pass; the hook was shown to reformat an edited file.
 
+- [x] **F11 Committed seed index** (requested 2026-10-07)
+  - Files: `backend/seed/` (`app.db`, `chroma/`, `README.md`), `.gitignore`, `backend/app/config.py` (`SEED_DIR`), `backend/app/main.py` (`seed_storage()`), `backend/tests/test_seed.py`, `backend/tests/conftest.py`
+  - Accept: the shared workspace includes the index for `data/` with no chat history, feedback, gaps, metrics or eval runs; a fresh checkout or container starts with it; existing local storage is never overwritten
+  - Verify: `uv run pytest tests/test_seed.py`; start the server on empty storage → `/api/stats` shows 40 documents and 176 chunks, `POST /api/ingest` reports 40 unchanged, retrieval returns the HTOL sources
+  - Status: Done: seed is 7.5 MB (Gemini collection only); 53 unit tests pass; the seeded server passed all three checks.
+
 ---
 
 ## Backlog

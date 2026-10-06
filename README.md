@@ -120,7 +120,8 @@ cd ..
 
 **5. Load the data and ask**
 - Open **http://localhost:5173**
-- Go to **Documents** → click **Ingest changes**. The first ingest enriches all 40 files with the LLM. It takes a few minutes with a hosted API and longer on Ollama.
+- **Using the Gemini preset (C)?** The index is already built: on first start the app copies the committed, chat-free index from [`backend/seed/`](backend/seed/README.md), so you can skip the ingest.
+- **Other providers:** go to **Documents** → click **Ingest changes**. The first ingest enriches all 40 files with the LLM. It takes a few minutes with a hosted API and longer on Ollama.
 - Go to **Ask** and try: *"Why did the Volta-7 Rev A fail HTOL, and what was the fix?"* 🎉
 
 ### Useful links once it's running

@@ -91,6 +91,7 @@ Feedback: feedback.py (correct / reject→routing / thumbs) → gaps → review 
 - **Every answered query is an assistant `messages` row:** message id = query id, used by `/api/query/{id}/…`.
 - **Re-ingest is idempotent** (source path + content_hash + collection); deleted files are pruned. Bump `PROMPT_VERSION` in `enrich.py` when the enrichment prompt changes, then ingest with `--force`.
 - **Chroma collections are per embedding model**, so switching models needs a re-ingest. Chroma metadata must be scalar, so lists are comma-joined there; canonical lists live in SQLite.
+- **A chat-free seed index lives in `backend/seed/`** (Gemini embeddings). `seed_storage()` copies it into empty storage on startup; regenerate it after `data/` changes (see `backend/seed/README.md`).
 - **`init_db()` adds new columns to existing databases** (`_ADDED_COLUMNS` in `db/sqlite.py`) when the schema grows.
 
 ## Configuration (`.env`, see `backend/.env.example`)
