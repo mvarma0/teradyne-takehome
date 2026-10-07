@@ -94,6 +94,19 @@ class PrefixedEmbeddings(Embeddings):
         return self.inner.embed_query(self.query_prefix + text)
 
 
+def rpm_limiter(rpm: int) -> InMemoryRateLimiter:
+    """Client-side cap of `rpm` requests/minute that still allows bursts.
+
+    A question makes several calls at once (guardrail, rewrite, parallel rerank, answer). With a
+    bucket of 1 they were spaced 60/rpm seconds apart (~35 s per question at 14 RPM); a bucket of
+    `rpm` that starts full lets one question's calls go through immediately, while the refill
+    rate keeps the average under the provider's per-minute limit.
+    """
+    limiter = InMemoryRateLimiter(requests_per_second=rpm / 60, max_bucket_size=rpm)
+    limiter.available_tokens = float(rpm)
+    return limiter
+
+
 @lru_cache(maxsize=1)
 def get_llm() -> BaseChatModel:
     from langchain.chat_models import init_chat_model
@@ -103,9 +116,7 @@ def get_llm() -> BaseChatModel:
         s.llm_provider, _api_key(s.llm_provider, s.llm_api_key, s.llm_base_url), s.llm_base_url, s
     )
     if s.llm_max_rpm > 0:
-        kwargs["rate_limiter"] = InMemoryRateLimiter(
-            requests_per_second=s.llm_max_rpm / 60, max_bucket_size=1
-        )
+        kwargs["rate_limiter"] = rpm_limiter(s.llm_max_rpm)
     if s.llm_provider not in _LOCAL_PROVIDERS:
         kwargs["max_retries"] = s.llm_max_retries
     try:
