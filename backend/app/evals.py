@@ -1,6 +1,6 @@
 """Offline evals over golden + synthetic question sets, with an LLM judge.
 
-CLI: uv run python -m app.evals [--dataset golden|synthetic|all] [--synthesize N]"""
+CLI: uv run python -m app.evals [--dataset golden|synthetic|all] [--synthesize N] [--calibrate]"""
 
 import argparse
 import json
@@ -324,6 +324,72 @@ _PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
+# ---- threshold calibration ----------------------------------------------------------------
+# Sweep CONFIDENCE_THRESHOLD over a finished run. A case "deserves" a confident answer when it
+# is answerable, cites an expected source and the judge finds its claims supported. Showing a
+# wrong answer as confident costs more than routing a good one, so false confidence weighs 2x.
+# Guardrail-blocked cases have no confidence and are left out.
+
+FALSE_CONFIDENT_COST = 2.0
+
+
+def _deserves_answer(r: dict) -> bool:
+    if not r["answerable"] or r.get("cited_expected") is False:
+        return False
+    if r.get("faithfulness") is None:  # refused, or the judge failed: trust the citation only
+        return bool(r.get("cited_expected")) and "judge failed" in r.get("judge_reason", "")
+    return r["faithfulness"] >= 0.7
+
+
+def calibrate(results: list[dict], thresholds: list[float] | None = None) -> dict:
+    thresholds = thresholds or [round(0.30 + 0.05 * i, 2) for i in range(11)]  # 0.30..0.80
+    # Guardrail-blocked cases never get a confidence score, so the threshold doesn't apply.
+    labelled = [
+        (r["confidence"], _deserves_answer(r)) for r in results if r["confidence"] is not None
+    ]
+    sweep = []
+    for t in thresholds:
+        false_confident = sum(c >= t and not good for c, good in labelled)
+        needless_route = sum(c < t and good for c, good in labelled)
+        sweep.append(
+            {
+                "threshold": t,
+                "false_confident": false_confident,
+                "needless_route": needless_route,
+                "accuracy": round(1 - (false_confident + needless_route) / len(labelled), 3),
+                "cost": FALSE_CONFIDENT_COST * false_confident + needless_route,
+            }
+        )
+    # Lowest cost wins; among tied thresholds take the middle one, the cut with the widest
+    # margin on both sides (rounding up, toward routing).
+    lowest = min(row["cost"] for row in sweep)
+    tied = [row for row in sweep if row["cost"] == lowest]
+    best = tied[len(tied) // 2]
+    return {
+        "cases": len(labelled),
+        "deserve_answer": sum(good for _, good in labelled),
+        "suggested_threshold": best["threshold"],
+        "optimal_range": [tied[0]["threshold"], tied[-1]["threshold"]],
+        "sweep": sweep,
+    }
+
+
+def latest_results(dataset: str | None = None) -> tuple[str, list[dict]]:
+    """Results of the newest completed run (optionally for one dataset)."""
+    query = "SELECT id FROM eval_runs WHERE status = 'completed'"
+    params: tuple = ()
+    if dataset:
+        query, params = query + " AND dataset = ?", (dataset,)
+    with connect() as conn:
+        row = conn.execute(query + " ORDER BY started_at DESC LIMIT 1", params).fetchone()
+        if not row:
+            raise ValueError("No completed eval run to calibrate from")
+        rows = conn.execute(
+            "SELECT result_json FROM eval_results WHERE run_id = ?", (row["id"],)
+        ).fetchall()
+    return row["id"], [json.loads(r["result_json"]) for r in rows]
+
+
 def synthesize(n: int = 20, seed: int = 7) -> int:
     chunks = [c for c in all_chunks() if len(c.page_content) > 300]
     by_doc: dict[str, list] = {}
@@ -364,7 +430,7 @@ def synthesize(n: int = 20, seed: int = 7) -> int:
 
 
 # ---- main ---------------------------------------------------------------------------------
-# CLI: uv run python -m app.evals [--dataset golden|synthetic|all] [--synthesize N]
+# CLI: uv run python -m app.evals [--dataset golden|synthetic|all] [--synthesize N] [--calibrate]
 
 TARGETS = {"hit_rate": 0.8, "faithfulness": 0.7, "answerability_accuracy": 0.7}
 
@@ -373,13 +439,30 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Run offline RAG evals")
     ap.add_argument("--dataset", default="golden", choices=["golden", "synthetic", "all"])
     ap.add_argument("--synthesize", type=int, metavar="N", help="generate N synthetic cases first")
+    ap.add_argument(
+        "--calibrate",
+        action="store_true",
+        help="sweep CONFIDENCE_THRESHOLD over the latest completed run instead of running one",
+    )
     args = ap.parse_args()
     logging.basicConfig(level=logging.WARNING)
     init_db()
+    if args.calibrate:
+        run_id, results = latest_results()
+        print(json.dumps({"run_id": run_id, **calibrate(results)}, indent=2))
+        return
     if args.synthesize:
         print(f"generated {synthesize(args.synthesize)} synthetic cases")
-    summary = run(args.dataset)["summary"]
+    result = run(args.dataset)
+    summary = result["summary"]
     print(json.dumps(summary, indent=2))
+    _, results = latest_results()
+    cal = calibrate(results)
+    print(
+        f"threshold: current {get_settings().confidence_threshold}, "
+        f"suggested {cal['suggested_threshold']} ({cal['deserve_answer']}/{cal['cases']} cases "
+        "deserve a confident answer; see --calibrate for the sweep)"
+    )
     failed = [k for k, t in TARGETS.items() if summary.get(k) is not None and summary[k] < t]
     if failed:
         print(f"BELOW TARGET: {failed} (targets {TARGETS})")

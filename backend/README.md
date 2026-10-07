@@ -132,7 +132,7 @@ EMBEDDING_MODEL=nomic-embed-text
 | `RERANK_TOP_N` | `10` | Fused candidates sent to the reranker |
 | `RERANK_CONCURRENCY` | `4` | Parallel rerank calls |
 | `RERANK_MAX_CHARS` | `1200` | Passage length sent to the reranker |
-| `CONFIDENCE_THRESHOLD` | `0.55` | Below this an answer is low confidence → routing + gap |
+| `CONFIDENCE_THRESHOLD` | `0.55` | Below this an answer is low confidence → routing + gap. Check it with `python -m app.evals --calibrate` |
 | `MIN_RETRIEVAL_SCORE` | `0.25` | A weak top semantic match caps confidence |
 | `HISTORY_MESSAGES` | `6` | Chat messages used to rewrite follow-up questions |
 | `GUARDRAILS_LLM` | `true` | LLM input classifier (injection heuristics always run) |

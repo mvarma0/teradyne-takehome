@@ -228,7 +228,8 @@ cd backend
 uv run pytest -m "not integration"                    # fast unit tests
 uv run pytest                                         # + end-to-end against local Ollama (skipped if unavailable)
 ./scripts/smoke_ex1.sh && ./scripts/smoke_ex2.sh      # curl checks against a running server
-uv run python -m app.evals --dataset golden           # retrieval and answer quality
+uv run python -m app.evals --dataset all              # golden + synthetic: retrieval and answer quality
+uv run python -m app.evals --calibrate                # check CONFIDENCE_THRESHOLD against the latest run
 cd ../frontend && npm run build                       # type-check + build
 ```
 

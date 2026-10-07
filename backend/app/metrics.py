@@ -109,55 +109,54 @@ def _alerts(current: dict, baseline: dict) -> list[dict]:
     if current["knowledge_queries"] < s.alert_min_samples:
         return alerts
 
-    def check(metric, value, bad, threshold, message):
-        if value is not None and bad:
-            alerts.append(
-                {
-                    "metric": metric,
-                    "value": value,
-                    "threshold": threshold,
-                    "severity": "critical"
-                    if metric in ("answer_rate", "citation_valid_ratio")
-                    else "warning",
-                    "message": message,
-                }
-            )
+    def check(metric, value, threshold, message, below=True):
+        # Compare the real value: a rate of 0.0 is the worst case and must alert.
+        if value is None or (value >= threshold if below else value <= threshold):
+            return
+        alerts.append(
+            {
+                "metric": metric,
+                "value": value,
+                "threshold": threshold,
+                "severity": "critical"
+                if metric in ("answer_rate", "citation_valid_ratio")
+                else "warning",
+                "message": message,
+            }
+        )
 
     c = current
     check(
         "answer_rate",
         c["answer_rate"],
-        (c["answer_rate"] or 1) < s.alert_min_answer_rate,
         s.alert_min_answer_rate,
         "Share of confidently answered questions is low",
     )
     check(
         "mean_confidence",
         c["mean_confidence"],
-        (c["mean_confidence"] or 1) < s.alert_min_mean_confidence,
         s.alert_min_mean_confidence,
         "Mean answer confidence is low",
     )
     check(
         "citation_valid_ratio",
         c["citation_valid_ratio"],
-        (c["citation_valid_ratio"] or 1) < s.alert_min_citation_valid_ratio,
         s.alert_min_citation_valid_ratio,
         "Answers cite excerpts that don't exist",
     )
     check(
         "negative_feedback_rate",
         c["negative_feedback_rate"],
-        (c["negative_feedback_rate"] or 0) > s.alert_max_negative_feedback_rate,
         s.alert_max_negative_feedback_rate,
         "Users reject or correct too many answers",
+        below=False,
     )
     check(
         "p95_latency_ms",
         c["p95_latency_ms"],
-        (c["p95_latency_ms"] or 0) > s.alert_max_p95_latency_ms,
         s.alert_max_p95_latency_ms,
         "Slow responses (p95)",
+        below=False,
     )
     if baseline["knowledge_queries"] >= s.alert_min_samples:
         for metric in ("answer_rate", "mean_confidence", "mean_top_semantic"):
