@@ -14,7 +14,7 @@ from app.answer import ChatRequest, answer, citation_payload, run_chat
 from app.config import get_settings
 from app.evals import synthesize
 from app.ingest import run_ingestion
-from app.llm import ConfigError, collection_name
+from app.llm import ConfigError, collection_name, is_rate_limited, rate_limited_detail
 from app.loaders import OFFICE_TYPES
 from app.schemas import (
     ChatBody,
@@ -188,7 +188,10 @@ def chat_stream(body: ChatBody) -> StreamingResponse:
             yield _sse("error", {"detail": str(exc)})
         except Exception as exc:
             log.exception("chat stream failed")
-            yield _sse("error", {"detail": f"{type(exc).__name__}: {exc}"})
+            detail = (
+                rate_limited_detail() if is_rate_limited(exc) else f"{type(exc).__name__}: {exc}"
+            )
+            yield _sse("error", {"detail": detail})
 
     return StreamingResponse(
         events(),

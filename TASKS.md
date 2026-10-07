@@ -81,11 +81,12 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Files: `scripts/smoke_ex1.sh`, `tests/conftest.py`, `tests/test_*.py`, `tests/fixtures/meetings/`
   - Verify: `uv run pytest` (17 unit + 1 Ollama integration) and the smoke script, all green
 
-- [ ] **1.10 Real-data run** (when `data/meetings/` is complete)
+- [x] **1.10 Real-data run** (when `data/meetings/` is complete)
   - Verify: `POST /api/ingest` → `files_found` = 20, `failed` = []; check `warnings` for files without attendee lists; spot-check `GET /api/documents` topics/priorities; run `./scripts/smoke_ex1.sh`
   - Status: To do: waiting for the full real-data run (`data/` now has 20 meetings + 15 documents).
   - Status (T3 run, Gemini `gemini-3.1-flash-lite` + `gemini-embedding-001`): ingest of all 35 files done (0 failed, 173 chunks); `smoke_ex1.sh` updated for the current payload and passes on real data. **Pending:** re-ingest the 5 spreadsheets after their author properties were added, then mark done.
   - Status (2026-10-06): the dataset now has 24 meetings + 16 documents (40 files) after the quality pass; the full real-data ingest still has to be re-run against it.
+  - Status (2026-10-07): Done. `POST /api/ingest` on the 40-file dataset: `files_found` = 40 (24 meeting, 6 docx, 5 pptx, 5 xlsx), `failed` = [], 176 chunks; `smoke_ex1.sh` passes on the real data (Gemini).
 
 ---
 
@@ -111,12 +112,13 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Verify: pytest; dry-run lists 5 xlsx
   - Status: Done: in `office.py`, one `## Sheet: name` section per sheet (docling markdown tables); tables split by rows with the header repeated (`chunking.py`).
 
-- [~] **2.4 Legacy formats + unified pipeline**
+- [x] **2.4 Legacy formats + unified pipeline**
   - Status (T3 run): 35 docs ingested on real data (20 meeting, 5 docx, 5 pptx, 5 xlsx). The 5 spreadsheets had no author/date properties; added author, title and date (user-approved data change, sheet contents unchanged; openpyxl + docling read them). **Pending:** re-ingest them; a LibreOffice check could not run here (Calc not installed in the sandbox).
   - Files: `app/ingestion/loaders/legacy.py`, `app/ingestion/loaders/__init__.py` (extension registry), `app/ingestion/pipeline.py`, `app/ingestion/chunking.py` (keep location metadata)
   - Accept: `.doc/.ppt/.xls` converted with `soffice --headless --convert-to` if available, else skipped with a warning; all types share one SourceDoc/enrichment path
   - Verify: `uv run python -m app.ingestion` → 35 docs; `curl -s 'localhost:8000/api/documents?source_type=xlsx' | jq length` → 5
   - Status: In progress: legacy shim and unified pipeline done, verified on fixtures plus mock Office files (7 docs). Still open: the 35-document check on the full real dataset.
+  - Status (2026-10-07): Done. The full 40-file dataset ingests through the one pipeline (see 1.10). With LibreOffice installed, copies of a corpus .docx/.pptx/.xlsx saved as .doc/.ppt/.xls load through `load_office` with their text, and with their author when the legacy file carries one. The dataset itself has no legacy files.
 
 - [x] **2.5 Business rules**
   - Files: `app/answer/business_rules.py`, `tests/test_business_rules.py`, hook into `enrich.py`
@@ -172,13 +174,14 @@ Design: docling normalizes markdown; title/date/attendees(+roles) are parsed det
   - Verify: fire about 10 queries, then `curl localhost:8000/api/metrics | jq`
   - Status: Done: `app/observability/metrics.py`; `/api/metrics?window=24h|7d|30d` with baseline comparison and alerts. JSON logging not added; standard logging with per-file progress lines.
 
-- [~] **2.14 Golden eval set**
+- [x] **2.14 Golden eval set**
   - Files: `eval/golden.jsonl` (~20 questions → expected source files, written from the real data), `eval/run_eval.py`
   - Accept: reports hit@k, MRR, citation validity and answerability on unanswerable controls; non-zero exit below the target (used as a regression gate); calibrate `CONFIDENCE_THRESHOLD`
   - Verify: `uv run python -m eval.run_eval` prints the report; hit@5 ≥ 0.8
   - Status: In progress: `eval/golden.jsonl` (11 questions from one docx + 3 controls), runner in `app/evals/` (`uv run python -m app.evals`), synthetic generator. Synthetic run verified on demo data. Still open: the golden run on real data and threshold calibration.
   - Status (T3 run): **Pending:** extend the golden set across meetings/docx/pptx/xlsx, run it on real data, calibrate `CONFIDENCE_THRESHOLD`. Note: the Gemini free tier allows 15 requests/min per model (`LLM_MAX_RPM=14`), so a question takes about a minute.
   - Status (2026-10-06): F9 ran the golden eval on real data with Gemini (hit rate 1.0, faithfulness 1.0, relevance 1.0). Still open: extend the set beyond one docx, re-run it on the 40-file dataset, and calibrate `CONFIDENCE_THRESHOLD`.
+  - Status (2026-10-07): Done. 34 cases (14 golden + 20 synthetic across meetings, docx, pptx, xlsx) on the 40-file dataset: hit rate 0.97, MRR 0.86, faithfulness 1.0, answerability 1.0, all unanswerables refused. `--calibrate` puts the zero-error range at 0.30–0.65, so `CONFIDENCE_THRESHOLD` stays 0.55 (results in TECH.md §6).
 
 - [x] **2.15 Ex2 smoke** ✅ CHECKPOINT
   - Files: `scripts/smoke_ex2.sh`

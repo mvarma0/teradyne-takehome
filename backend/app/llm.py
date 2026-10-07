@@ -156,3 +156,31 @@ def collection_name() -> str:
     s = get_settings()
     suffix = re.sub(r"[^a-zA-Z0-9]+", "-", f"{s.embedding_provider}-{s.embedding_model}")
     return f"{s.chroma_collection}__{suffix.strip('-').lower()}"[:63]
+
+
+def is_rate_limited(exc: BaseException) -> bool:
+    """True when a provider refused a call for rate limits or quota (HTTP 429).
+
+    Providers raise their own classes (openai.RateLimitError, GoogleRateLimitError, Anthropic's
+    RateLimitError, Gemini RESOURCE_EXHAUSTED), sometimes wrapped, so walk the cause chain and
+    match on the status code, the class name or the provider's status text.
+    """
+    seen: set[int] = set()
+    err: BaseException | None = exc
+    while err is not None and id(err) not in seen:
+        seen.add(id(err))
+        if 429 in (getattr(err, "status_code", None), getattr(err, "code", None)):
+            return True
+        name = type(err).__name__.lower()
+        if "ratelimit" in name or "resourceexhausted" in name or "RESOURCE_EXHAUSTED" in str(err):
+            return True
+        err = err.__cause__ or err.__context__
+    return False
+
+
+def rate_limited_detail() -> str:
+    return (
+        f"The model provider ({llm_identity()}) rejected the request: rate limit or quota "
+        "exceeded. Try again in a minute; if the daily quota is used up, switch to another "
+        "provider or key in backend/.env."
+    )

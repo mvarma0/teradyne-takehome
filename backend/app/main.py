@@ -13,7 +13,7 @@ from app import api
 from app.config import get_settings
 from app.db import init_db
 from app.ingest import _encoding
-from app.llm import ConfigError, get_embeddings, get_llm
+from app.llm import ConfigError, get_embeddings, get_llm, is_rate_limited, rate_limited_detail
 from app.search import get_vectorstore, invalidate_bm25
 
 # ---- state --------------------------------------------------------------------------------
@@ -102,6 +102,20 @@ async def _provider_unreachable(_: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(
         status_code=503,
         content={"detail": f"Model provider unreachable (is Ollama running?): {exc}"},
+    )
+
+
+@app.exception_handler(Exception)
+async def _provider_or_internal_error(_: Request, exc: Exception) -> JSONResponse:
+    # Unhandled errors still get logged by Starlette; the client gets a readable reason.
+    if is_rate_limited(exc):
+        return JSONResponse(
+            status_code=503,
+            content={"detail": rate_limited_detail()},
+            headers={"Retry-After": "60"},
+        )
+    return JSONResponse(
+        status_code=500, content={"detail": f"Internal error ({type(exc).__name__})"}
     )
 
 
