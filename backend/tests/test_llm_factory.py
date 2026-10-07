@@ -68,3 +68,11 @@ def test_embeddings_and_collection_follow_provider(monkeypatch: pytest.MonkeyPat
 def test_nomic_embeddings_get_task_prefixes(monkeypatch: pytest.MonkeyPatch):
     _use(monkeypatch, EMBEDDING_PROVIDER="ollama", EMBEDDING_MODEL="nomic-embed-text")
     assert isinstance(llm.get_embeddings(), llm.PrefixedEmbeddings)
+
+
+def test_rpm_limiter_allows_one_question_burst_but_caps_the_minute():
+    limiter = llm.rpm_limiter(14)
+    # A fresh process can send a whole question's calls at once ...
+    assert all(limiter.acquire(blocking=False) for _ in range(14))
+    # ... and is then throttled back to the per-minute rate.
+    assert limiter.acquire(blocking=False) is False
